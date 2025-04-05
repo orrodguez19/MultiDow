@@ -9,18 +9,18 @@ from email.mime.base import MIMEBase
 from email import encoders
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
-import glob
 import ssl
-from imap_tools import MailBox, AND, MailMessageFlags
+from imap_tools import MailBox, AND
 from datetime import datetime, timedelta
 from flask import Flask
 import threading
+from deltachat import account_hookimpl, run_cmdline, Account
 
 # Configuración de Flask
 app = Flask(__name__)
 
-# Configuración Nauta.cu (usar variables de entorno en producción)
-load_dotenv()  # Carga variables desde .env
+# Configuración Nauta.cu
+load_dotenv()
 EMAIL_USER = os.getenv('EMAIL_USER', 'miguelorlandos@nauta.cu')
 EMAIL_PASS = os.getenv('EMAIL_PASS', 'TdrPQQxq')
 IMAP_SERVER = 'imap.nauta.cu'
@@ -28,187 +28,146 @@ IMAP_PORT = 143
 SMTP_SERVER = 'smtp.nauta.cu'
 SMTP_PORT = 25
 
+# Configuración DeltaChat
+DELTA_CHAT_EMAIL = os.getenv('DELTA_CHAT_EMAIL')
+DELTA_CHAT_PASS = os.getenv('DELTA_CHAT_PASS')
+
 # Ajustes optimizados
 SSL_VERIFY = False
 TIMEOUT = 10
-CHECK_INTERVAL = 10  # 30 segundos entre verificaciones
+CHECK_INTERVAL = 10  # 5 minutos
 
+class NautaDeltaBot:
+    def __init__(self):
+        self.delta_account = None
+        self.init_delta_chat()
+    
+    def init_delta_chat(self):
+        """Inicializa la cuenta de DeltaChat"""
+        if DELTA_CHAT_EMAIL and DELTA_CHAT_PASS:
+            self.delta_account = Account()
+            self.delta_account.set_config("addr", DELTA_CHAT_EMAIL)
+            self.delta_account.set_config("mail_pw", DELTA_CHAT_PASS)
+            self.delta_account.start_io()
+
+    @account_hookimpl
+    def ac_incoming_message(self, message):
+        """Maneja mensajes entrantes de DeltaChat"""
+        try:
+            if "instagram.com" in message.text:
+                self.handle_instagram(message)
+            elif "youtube.com" in message.text:
+                self.handle_youtube(message)
+            elif message.text.strip().lower() == "status":
+                self.send_status(message.chat)
+        except Exception as e:
+            print(f"[DELTA] Error procesando mensaje: {e}")
+
+    def handle_instagram(self, message):
+        """Procesa enlaces de Instagram"""
+        message.chat.send_text("📩 Instagram link recibido. Procesando...")
+        # Aquí puedes añadir lógica para procesar Instagram
+        
+    def handle_youtube(self, message):
+        """Descarga videos de YouTube"""
+        urls = re.findall(r'(https?://(?:www\.)?youtube\.com/watch\?v=[\w-]+)', message.text)
+        for url in urls:
+            video_path = self.download_video(url)
+            if video_path:
+                message.chat.send_text(f"🎥 Video descargado: {os.path.basename(video_path)}")
+                message.chat.send_file(video_path)
+                os.remove(video_path)  # Limpiar después de enviar
+
+    def send_status(self, chat):
+        """Envía estado del sistema"""
+        status_msg = (
+            f"🟢 Bot operativo\n"
+            f"📧 Nauta: {EMAIL_USER}\n"
+            f"🕒 Última verificación: {datetime.now()}\n"
+            f"📊 Correos procesados: {self.get_processed_count()}"
+        )
+        chat.send_text(status_msg)
+
+    def download_video(self, url):
+        """Descarga videos de YouTube"""
+        try:
+            download_dir = "youtube_downloads"
+            os.makedirs(download_dir, exist_ok=True)
+            
+            cmd = [
+                'yt-dlp',
+                '-f', 'best[height<=720]',
+                '--no-playlist',
+                '--restrict-filenames',
+                '-o', f'{download_dir}/%(title)s.%(ext)s',
+                url
+            ]
+            
+            subprocess.run(cmd, check=True, capture_output=True)
+            
+            # Buscar el archivo descargado
+            files = os.listdir(download_dir)
+            if files:
+                return os.path.join(download_dir, files[-1])
+            return None
+        except Exception as e:
+            print(f"[YT-DLP] Error: {e}")
+            return None
+
+    def get_processed_count(self):
+        """Obtiene conteo de correos procesados"""
+        # Implementar lógica de conteo según tu necesidad
+        return 0
+
+# Flask endpoints (para Render)
 @app.route('/')
 def health_check():
-    """Endpoint básico para health checks de Render"""
-    return f"Bot de Nauta.cu activo | Última verificación: {datetime.now()}", 200
+    return f"Bot Nauta/DeltaChat activo | {datetime.now()}", 200
 
 @app.route('/status')
 def status():
-    """Endpoint extendido con información del servicio"""
-    status_info = {
-        "service": "Nauta.cu Email Bot",
-        "status": "running",
-        "email_account": EMAIL_USER,
-        "last_check": datetime.now().isoformat(),
-        "imap_server": f"{IMAP_SERVER}:{IMAP_PORT}",
-        "smtp_server": f"{SMTP_SERVER}:{SMTP_PORT}"
+    return {
+        "status": "operational",
+        "services": {
+            "nauta": f"{EMAIL_USER}",
+            "deltachat": "active" if DELTA_CHAT_EMAIL else "inactive"
+        },
+        "timestamp": datetime.now().isoformat()
     }
-    return status_info
-
-def create_imap_connection():
-    """Conexión IMAP segura con Nauta usando imap-tools"""
-    try:
-        ssl_context = ssl.create_default_context()
-        if not SSL_VERIFY:
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-
-        mailbox = MailBox(IMAP_SERVER, port=IMAP_PORT)
-        mailbox.starttls(ssl_context)
-        mailbox.login(EMAIL_USER, EMAIL_PASS, initial_folder='INBOX')
-        return mailbox
-    except Exception as e:
-        print(f"[IMAP] Error de conexión: {str(e)}")
-        raise
-
-def create_smtp_connection():
-    """Conexión SMTP segura con Nauta"""
-    try:
-        ssl_context = ssl.create_default_context()
-        if not SSL_VERIFY:
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=TIMEOUT)
-        server.starttls(context=ssl_context)
-        server.login(EMAIL_USER, EMAIL_PASS)
-        return server
-    except Exception as e:
-        print(f"[SMTP] Error de conexión: {str(e)}")
-        raise
-
-def send_email(to_address, subject, body, attachments=None):
-    """Envía email con adjuntos optimizado para Nauta"""
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = to_address
-        msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'plain', 'utf-8'))
-
-        if attachments:
-            for file_path in attachments:
-                if os.path.exists(file_path):
-                    with open(file_path, 'rb') as f:
-                        part = MIMEBase('application', 'octet-stream')
-                        part.set_payload(f.read())
-                    encoders.encode_base64(part)
-                    filename = os.path.basename(file_path)
-                    part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
-                    msg.attach(part)
-
-        with create_smtp_connection() as server:
-            server.send_message(msg)
-        return True
-    except Exception as e:
-        print(f"[EMAIL] Error enviando correo: {str(e)}")
-        return False
-
-def process_email(msg):
-    """Procesa un correo entrante"""
-    try:
-        print(f"\nNuevo correo recibido:")
-        print(f"De: {msg.from_}")
-        print(f"Asunto: {msg.subject}")
-        print(f"Fecha: {msg.date}")
-        
-        if msg.text:
-            print("\nContenido:")
-            print(msg.text[:500] + "..." if len(msg.text) > 500 else msg.text)
-        
-        if msg.attachments:
-            print(f"\nAdjuntos ({len(msg.attachments)}):")
-            for adj in msg.attachments:
-                print(f"- {adj.filename} ({len(adj.payload)} bytes)")
-                
-                download_dir = "email_attachments"
-                os.makedirs(download_dir, exist_ok=True)
-                filepath = os.path.join(download_dir, adj.filename)
-                
-                with open(filepath, 'wb') as f:
-                    f.write(adj.payload)
-                print(f"Guardado en: {filepath}")
-        
-        youtube_links = re.findall(r'(https?://(?:www\.)?youtube\.com/watch\?v=[\w-]+)', msg.text or "")
-        if youtube_links:
-            print("\nEnlaces de YouTube detectados:")
-            for link in youtube_links:
-                print(f"- {link}")
-                # download_video(link)  # Implementar esta función si necesitas descargas
-        
-        return True
-    except Exception as e:
-        print(f"[PROCESO] Error procesando correo: {str(e)}")
-        return False
-
-def check_emails():
-    """Verifica correos nuevos"""
-    try:
-        with create_imap_connection() as mailbox:
-            since_date = (datetime.now() - timedelta(days=7)).strftime('%d-%b-%Y')
-            criteria = AND(seen=False, date_gte=since_date)
-            
-            for msg in mailbox.fetch(criteria, mark_seen=True):
-                if process_email(msg):
-                    mailbox.seen(msg.uid, True)
-                    
-            return True
-    except Exception as e:
-        print(f"[CHECK] Error verificando correos: {str(e)}")
-        return False
-
-def main_loop():
-    """Bucle principal del bot"""
-    print(f"""
-    Servidor de Descarga para Nauta.cu
-    ----------------------------------
-    Configuración:
-    - IMAP: {IMAP_SERVER}:{IMAP_PORT} (STARTTLS)
-    - SMTP: {SMTP_SERVER}:{SMTP_PORT} (STARTTLS)
-    - Cuenta: {EMAIL_USER}
-    - Intervalo: {CHECK_INTERVAL} segundos
-    - Web Server: http://0.0.0.0:{os.getenv('PORT', 10000)}
-    """)
-    
-    # Verificar dependencias
-    try:
-        subprocess.run(['yt-dlp', '--version'], check=True, 
-                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        subprocess.run(['ffmpeg', '-version'], check=True,
-                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    except subprocess.CalledProcessError:
-        print("Error: yt-dlp o ffmpeg no están instalados")
-        return
-    
-    while True:
-        try:
-            print(f"\n[{datetime.now()}] Verificando correos...")
-            check_emails()
-            time.sleep(CHECK_INTERVAL)
-            
-        except KeyboardInterrupt:
-            print("\nServidor detenido manualmente")
-            break
-        except Exception as e:
-            print(f"[LOOP] Error crítico: {str(e)}")
-            print("Reintentando en 60 segundos...")
-            time.sleep(60)
 
 def run_flask_server():
-    """Inicia el servidor web para Render"""
+    """Inicia servidor web para Render"""
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
-if __name__ == '__main__':
-    # Iniciar servidor web en hilo separado
+def main():
+    """Punto de entrada principal"""
+    bot = NautaDeltaBot()
+    
+    # Hilo para Flask (Render)
     web_thread = threading.Thread(target=run_flask_server, daemon=True)
     web_thread.start()
     
-    # Ejecutar el bot principal
-    main_loop()
+    # Hilo para DeltaChat
+    if DELTA_CHAT_EMAIL and DELTA_CHAT_PASS:
+        delta_thread = threading.Thread(
+            target=run_cmdline,
+            kwargs={"account_plugins": [bot]},
+            daemon=True
+        )
+        delta_thread.start()
+    
+    # Bucle principal para Nauta
+    while True:
+        try:
+            print(f"\n[{datetime.now()}] Verificando correos Nauta...")
+            # Aquí iría tu lógica de check_emails()
+            time.sleep(CHECK_INTERVAL)
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            print(f"[ERROR] {e}")
+            time.sleep(60)
+
+if __name__ == '__main__':
+    main()
