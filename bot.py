@@ -22,7 +22,7 @@ app = Flask(__name__)
 # Configuración Nauta.cu (usar variables de entorno en producción)
 load_dotenv()  # Carga variables desde .env
 EMAIL_USER = os.getenv('EMAIL_USER', 'miguelorlandos@nauta.cu')
-EMAIL_PASS = os.getenv('EMAIL_PASS', 'mO*061119')
+EMAIL_PASS = os.getenv('EMAIL_PASS', 'TdrPQQxq')
 IMAP_SERVER = 'imap.nauta.cu'
 IMAP_PORT = 143
 SMTP_SERVER = 'smtp.nauta.cu'
@@ -30,8 +30,8 @@ SMTP_PORT = 25
 
 # Ajustes optimizados
 SSL_VERIFY = False
-TIMEOUT = 20
-CHECK_INTERVAL = 30  # 30 segundos entre verificaciones
+TIMEOUT = 10
+CHECK_INTERVAL = 10  # 30 segundos entre verificaciones
 
 @app.route('/')
 def health_check():
