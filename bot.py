@@ -13,22 +13,46 @@ import glob
 import ssl
 from imap_tools import MailBox, AND, MailMessageFlags
 from datetime import datetime, timedelta
+from flask import Flask
+import threading
 
-# Configuración Nauta.cu
-EMAIL_USER = 'miguelorlandos@nauta.cu'
-EMAIL_PASS = 'tu_contraseña'  # Usar variables de entorno en producción
+# Configuración de Flask
+app = Flask(__name__)
+
+# Configuración Nauta.cu (usar variables de entorno en producción)
+load_dotenv()  # Carga variables desde .env
+EMAIL_USER = os.getenv('EMAIL_USER', 'miguelorlandos@nauta.cu')
+EMAIL_PASS = os.getenv('EMAIL_PASS', 'mO*061119')
 IMAP_SERVER = 'imap.nauta.cu'
-IMAP_PORT = 143  # Puerto con STARTTLS
+IMAP_PORT = 143
 SMTP_SERVER = 'smtp.nauta.cu'
-SMTP_PORT = 25   # Puerto con STARTTLS
+SMTP_PORT = 25
 
 # Ajustes optimizados
 SSL_VERIFY = False
-TIMEOUT = 45  # Mayor tiempo para conexiones lentas
-CHECK_INTERVAL = 300  # 5 minutos entre verificaciones
+TIMEOUT = 20
+CHECK_INTERVAL = 30  # 30 segundos entre verificaciones
+
+@app.route('/')
+def health_check():
+    """Endpoint básico para health checks de Render"""
+    return f"Bot de Nauta.cu activo | Última verificación: {datetime.now()}", 200
+
+@app.route('/status')
+def status():
+    """Endpoint extendido con información del servicio"""
+    status_info = {
+        "service": "Nauta.cu Email Bot",
+        "status": "running",
+        "email_account": EMAIL_USER,
+        "last_check": datetime.now().isoformat(),
+        "imap_server": f"{IMAP_SERVER}:{IMAP_PORT}",
+        "smtp_server": f"{SMTP_SERVER}:{SMTP_PORT}"
+    }
+    return status_info
 
 def create_imap_connection():
-    """Crea conexión IMAP segura con Nauta usando imap-tools"""
+    """Conexión IMAP segura con Nauta usando imap-tools"""
     try:
         ssl_context = ssl.create_default_context()
         if not SSL_VERIFY:
@@ -44,7 +68,7 @@ def create_imap_connection():
         raise
 
 def create_smtp_connection():
-    """Crea conexión SMTP segura con Nauta"""
+    """Conexión SMTP segura con Nauta"""
     try:
         ssl_context = ssl.create_default_context()
         if not SSL_VERIFY:
@@ -94,18 +118,15 @@ def process_email(msg):
         print(f"Asunto: {msg.subject}")
         print(f"Fecha: {msg.date}")
         
-        # Procesar texto del correo
         if msg.text:
             print("\nContenido:")
             print(msg.text[:500] + "..." if len(msg.text) > 500 else msg.text)
         
-        # Procesar adjuntos
         if msg.attachments:
             print(f"\nAdjuntos ({len(msg.attachments)}):")
             for adj in msg.attachments:
                 print(f"- {adj.filename} ({len(adj.payload)} bytes)")
                 
-                # Guardar adjuntos en una carpeta
                 download_dir = "email_attachments"
                 os.makedirs(download_dir, exist_ok=True)
                 filepath = os.path.join(download_dir, adj.filename)
@@ -114,15 +135,12 @@ def process_email(msg):
                     f.write(adj.payload)
                 print(f"Guardado en: {filepath}")
         
-        # Aquí puedes añadir tu lógica de procesamiento de videos
-        # Ejemplo: buscar enlaces de YouTube en el texto
         youtube_links = re.findall(r'(https?://(?:www\.)?youtube\.com/watch\?v=[\w-]+)', msg.text or "")
         if youtube_links:
             print("\nEnlaces de YouTube detectados:")
             for link in youtube_links:
                 print(f"- {link}")
-                # Aquí podrías llamar a yt-dlp para descargar
-                # download_video(link)
+                # download_video(link)  # Implementar esta función si necesitas descargas
         
         return True
     except Exception as e:
@@ -130,16 +148,14 @@ def process_email(msg):
         return False
 
 def check_emails():
-    """Verifica correos nuevos de forma activa (polling)"""
+    """Verifica correos nuevos"""
     try:
         with create_imap_connection() as mailbox:
-            # Buscar correos no leídos de los últimos 7 días
             since_date = (datetime.now() - timedelta(days=7)).strftime('%d-%b-%Y')
             criteria = AND(seen=False, date_gte=since_date)
             
             for msg in mailbox.fetch(criteria, mark_seen=True):
                 if process_email(msg):
-                    # Opcional: Marcar como leído después de procesar
                     mailbox.seen(msg.uid, True)
                     
             return True
@@ -148,7 +164,7 @@ def check_emails():
         return False
 
 def main_loop():
-    """Bucle principal mejorado"""
+    """Bucle principal del bot"""
     print(f"""
     Servidor de Descarga para Nauta.cu
     ----------------------------------
@@ -156,7 +172,8 @@ def main_loop():
     - IMAP: {IMAP_SERVER}:{IMAP_PORT} (STARTTLS)
     - SMTP: {SMTP_SERVER}:{SMTP_PORT} (STARTTLS)
     - Cuenta: {EMAIL_USER}
-    - Intervalo de verificación: {CHECK_INTERVAL} segundos
+    - Intervalo: {CHECK_INTERVAL} segundos
+    - Web Server: http://0.0.0.0:{os.getenv('PORT', 10000)}
     """)
     
     # Verificar dependencias
@@ -166,10 +183,9 @@ def main_loop():
         subprocess.run(['ffmpeg', '-version'], check=True,
                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except subprocess.CalledProcessError:
-        print("Error: yt-dlp o ffmpeg no están instalados correctamente")
+        print("Error: yt-dlp o ffmpeg no están instalados")
         return
     
-    # Bucle principal
     while True:
         try:
             print(f"\n[{datetime.now()}] Verificando correos...")
@@ -184,5 +200,15 @@ def main_loop():
             print("Reintentando en 60 segundos...")
             time.sleep(60)
 
+def run_flask_server():
+    """Inicia el servidor web para Render"""
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
+
 if __name__ == '__main__':
+    # Iniciar servidor web en hilo separado
+    web_thread = threading.Thread(target=run_flask_server, daemon=True)
+    web_thread.start()
+    
+    # Ejecutar el bot principal
     main_loop()
