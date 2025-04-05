@@ -29,8 +29,10 @@ SMTP_SERVER = 'smtp.nauta.cu'
 SMTP_PORT = 25
 
 # Configuración DeltaChat
-DELTA_CHAT_EMAIL = os.getenv('DELTA_CHAT_EMAIL')
-DELTA_CHAT_PASS = os.getenv('DELTA_CHAT_PASS')
+DELTA_CHAT_EMAIL=os.getenv('EMAIL_USER')
+DELTA_CHAT_PASS=os.getenv('EMAIL_PASS')   DELTA_SERVER="imap.nauta.cu"
+DELTA_PORT=143                            DELTA_SMTP_SERVER="smtp.nauta.cu"
+DELTA_SMTP_PORT=25
 
 # Ajustes optimizados
 SSL_VERIFY = False
