@@ -7,15 +7,13 @@ from deltachat import Account, account_hookimpl
 
 app = Flask(__name__)
 
-# Configuración (ajusta estos valores)
+# Configuración
 DELTA_EMAIL = "multidown@arcanechat.me"
 DELTA_PASSWORD = "mO*061119"
 IMAP_SERVER = "mail.arcanechat.me"
 IMAP_PORT = "143"
 SMTP_SERVER = "mail.arcanechat.me"
 SMTP_PORT = "25"
-
-# Ruta para la base de datos (requerida por DeltaChat)
 DB_PATH = os.path.join(os.getcwd(), "delta_chat.db")
 
 class YoutubeDLBot:
@@ -33,29 +31,19 @@ class YoutubeDLBot:
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 video_path = f"{tmpdir}/video.mp4"
-                
                 subprocess.run([
                     "yt-dlp",
                     "-f", "best[ext=mp4]",
                     "-o", video_path,
-                    "--no-playlist",
                     message.text.strip()
                 ], check=True, timeout=300)
                 
                 if os.path.exists(video_path):
-                    if os.path.getsize(video_path) > 25 * 1024 * 1024:  # 25MB
-                        message.chat.send_text("⚠️ Video demasiado grande (límite: 25MB)")
-                    else:
-                        message.chat.send_video(video_path)
-                else:
-                    message.chat.send_text("❌ Error al descargar el video")
-        except subprocess.TimeoutExpired:
-            message.chat.send_text("⏳ Tiempo excedido - Intenta con un video más corto")
+                    message.chat.send_video(video_path)
         except Exception as e:
             message.chat.send_text(f"❌ Error: {str(e)}")
 
 def setup_bot():
-    # Inicializar Account con la ruta de la base de datos
     account = Account(DB_PATH)
     account.set_config("addr", DELTA_EMAIL)
     account.set_config("mail_pw", DELTA_PASSWORD)
@@ -65,28 +53,33 @@ def setup_bot():
     account.set_config("send_port", SMTP_PORT)
     account.set_config("mail_security", "ssl")
     
-    account.configure()
+    if not account.is_configured():
+        account.configure()
+    
     bot = YoutubeDLBot()
     account.add_account_plugin(bot)
     return account
 
 @app.route('/')
 def health_check():
-    return "Bot DeltaChat activo"
+    return "Bot activo"
 
 if __name__ == "__main__":
-    # Asegurar que el directorio de la base de datos exista
+    # Crear directorio si no existe
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     
-    delta_bot = setup_bot()
+    # Iniciar bot
+    account = setup_bot()
     
-    # Iniciar Flask en puerto para Render
+    # Iniciar Flask en segundo plano
     port = int(os.environ.get("PORT", 10000))
-    threading.Thread(
+    flask_thread = threading.Thread(
         target=app.run,
         kwargs={"host": "0.0.0.0", "port": port},
         daemon=True
-    ).start()
+    )
+    flask_thread.start()
     
-    # Mantener el bot activo
-    delta_bot.run()
+    # Mantener el bot activo (forma correcta)
+    print("Bot DeltaChat iniciado")
+    account.wait_shutdown()  # Reemplazo correcto para run()
