@@ -7,14 +7,16 @@ from deltachat import Account, account_hookimpl
 
 app = Flask(__name__)
 
-## CONFIGURACIÓN DIRECTA (EDITA ESTOS VALORES) ##
+# Configuración (ajusta estos valores)
 DELTA_EMAIL = "multidown@arcanechat.me"
 DELTA_PASSWORD = "mO*061119"
 IMAP_SERVER = "mail.arcanechat.me"
 IMAP_PORT = "143"
 SMTP_SERVER = "mail.arcanechat.me"
 SMTP_PORT = "25"
-###############################################
+
+# Ruta para la base de datos (requerida por DeltaChat)
+DB_PATH = os.path.join(os.getcwd(), "delta_chat.db")
 
 class YoutubeDLBot:
     @account_hookimpl
@@ -53,7 +55,8 @@ class YoutubeDLBot:
             message.chat.send_text(f"❌ Error: {str(e)}")
 
 def setup_bot():
-    account = Account()
+    # Inicializar Account con la ruta de la base de datos
+    account = Account(DB_PATH)
     account.set_config("addr", DELTA_EMAIL)
     account.set_config("mail_pw", DELTA_PASSWORD)
     account.set_config("mail_server", IMAP_SERVER)
@@ -72,6 +75,9 @@ def health_check():
     return "Bot DeltaChat activo"
 
 if __name__ == "__main__":
+    # Asegurar que el directorio de la base de datos exista
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    
     delta_bot = setup_bot()
     
     # Iniciar Flask en puerto para Render
