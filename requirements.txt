@@ -3,6 +3,7 @@ Flask>=2.0.0
 imapclient>=2.3.1
 deltachat>=1.100.0
 imap-tools>=1.0.4
+waitress>=2.1.2
 python-dotenv>=1.0.0
 yt-dlp>=2023.11.16
 ffmpeg-python>=0.2.0
