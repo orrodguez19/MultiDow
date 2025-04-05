@@ -19,20 +19,21 @@ from deltachat import account_hookimpl, run_cmdline, Account
 # Configuración de Flask
 app = Flask(__name__)
 
-# Configuración Nauta.cu
-load_dotenv()
-EMAIL_USER = os.getenv('EMAIL_USER', 'miguelorlandos@nauta.cu')
-EMAIL_PASS = os.getenv('EMAIL_PASS', 'TdrPQQxq')
+# Configuración Nauta.cu (directamente en código - SOLO PARA PRUEBAS)
+EMAIL_USER = "miguelorlandos@nauta.cu"  # Reemplaza con tu usuario real
+EMAIL_PASS = "TdrPQQxq"  # Reemplaza con tu contraseña real
 IMAP_SERVER = 'imap.nauta.cu'
 IMAP_PORT = 143
 SMTP_SERVER = 'smtp.nauta.cu'
 SMTP_PORT = 25
 
-# Configuración DeltaChat
-DELTA_CHAT_EMAIL=os.getenv('EMAIL_USER')
-DELTA_CHAT_PASS=os.getenv('EMAIL_PASS')   DELTA_SERVER="imap.nauta.cu"
-DELTA_PORT=143                            DELTA_SMTP_SERVER="smtp.nauta.cu"
-DELTA_SMTP_PORT=25
+# Configuración DeltaChat (directamente en código - SOLO PARA PRUEBAS)
+DELTA_CHAT_EMAIL = "miguelorlandos@nauta.cu"  # Reemplaza con tu email DeltaChat
+DELTA_CHAT_PASS = "TdrPQQxq"          # Reemplaza con tu contraseña
+DELTA_SERVER = "imap.nauta.cu"                   # Usando Gmail como ejemplo
+DELTA_PORT = 143
+DELTA_SMTP_SERVER = "smtp.nauta.cu"
+DELTA_SMTP_PORT = 25
 
 # Ajustes optimizados
 SSL_VERIFY = False
