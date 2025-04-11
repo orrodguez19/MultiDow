@@ -1,80 +1,74 @@
 import os
-import tempfile
-import subprocess
-import threading
-import time
-from flask import Flask, Response
-from deltachat import Account, account_hookimpl
+import requests
+from flask import Flask, render_template, request, jsonify
+from yt_dlp import YoutubeDL
+from urllib.parse import unquote
 
 app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = 'temp'
+app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1GB
+app.config['ALLOWED_EXTENSIONS'] = {'mp4', 'webm', 'mkv', 'mov'}
 
-# Configuración - RELLENA ESTOS VALORES
-DELTA_EMAIL = "multidown@arcanechat.me"
-DELTA_PASSWORD = "mO*061119"
-IMAP_SERVER = "arcanechat.me"
-SMTP_SERVER = "arcanechat.me"
-DB_PATH = "/tmp/delta_chat.db"  # Usar /tmp en Render
+# Crear directorio temporal si no existe
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-class YoutubeDLBot:
-    @account_hookimpl
-    def ac_incoming_message(self, message):
-        if any(domain in message.text.lower() for domain in ["youtube.com", "youtu.be"]):
-            self._process_video(message)
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
-    def _process_video(self, message):
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                video_path = f"{tmpdir}/video.mp4"
-                subprocess.run([
-                    "yt-dlp",
-                    "-f", "best[ext=mp4]",
-                    "-o", video_path,
-                    message.text.strip()
-                ], check=True, timeout=300)
-                
-                if os.path.exists(video_path):
-                    message.chat.send_video(video_path)
-        except Exception as e:
-            message.chat.send_text(f"Error: {str(e)}")
-
-def setup_bot():
-    account = Account(DB_PATH)
-    # Configuración IMAP/SMTP
-    account.set_config("addr", DELTA_EMAIL)
-    account.set_config("mail_pw", DELTA_PASSWORD)
-    account.set_config("mail_server", IMAP_SERVER)
-    account.set_config("mail_port", "143")
-    account.set_config("send_server", SMTP_SERVER)
-    account.set_config("send_port", "25")
-    account.set_config("mail_security", "ssl")
-    
-    if not account.is_configured():
-        account.configure()
-        time.sleep(15)
-    
-    return account
+def upload_to_transfer(file_path):
+    try:
+        with open(file_path, 'rb') as f:
+            response = requests.put(
+                f'https://transfer.sh/{os.path.basename(file_path)}',
+                data=f,
+                headers={'Max-Days': '3'}  # Archivo disponible por 3 días
+            )
+        return response.text.strip()
+    except Exception as e:
+        raise RuntimeError(f'Error subiendo archivo: {str(e)}')
 
 @app.route('/')
-def health_check():
-    """Endpoint de health check obligatorio para Render"""
-    return Response("Bot DeltaChat Operativo", status=200, mimetype='text/plain')
+def index():
+    return render_template('index.html')
 
-def run_web_server():
-    """Inicia el servidor web en el puerto correcto"""
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, threaded=True)
+@app.route('/download', methods=['POST'])
+def download():
+    url = unquote(request.form.get('url', '')).strip()
+    if not url:
+        return jsonify({'error': 'URL no proporcionada'}), 400
+    
+    try:
+        # Configuración yt-dlp
+        ydl_opts = {
+            'outtmpl': os.path.join(app.config['UPLOAD_FOLDER'], '%(title)s.%(ext)s'),
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'merge_output_format': 'mp4',
+            'quiet': True,
+            'no_warnings': True,
+            'progress_hooks': [lambda d: None]  # Necesario para evitar errores
+        }
 
-if __name__ == "__main__":
-    # 1. Configuración inicial
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        # Descargar video
+        with YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(url, download=True)
+            file_path = ydl.prepare_filename(info_dict)
+
+        # Validar y subir archivo
+        if not allowed_file(file_path):
+            raise ValueError('Formato de archivo no permitido')
+        
+        download_link = upload_to_transfer(file_path)
+        os.remove(file_path)  # Limpiar archivo temporal
+
+        return jsonify({
+            'download_link': download_link,
+            'video_title': info_dict.get('title', 'video'),
+            'thumbnail': info_dict.get('thumbnail', '')
+        })
     
-    # 2. Iniciar bot DeltaChat en segundo plano
-    bot_account = setup_bot()
-    bot_thread = threading.Thread(
-        target=bot_account.run_forever,
-        daemon=True
-    )
-    bot_thread.start()
-    
-    # 3. Iniciar servidor web (OBLIGATORIO para Render)
-    run_web_server()
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
