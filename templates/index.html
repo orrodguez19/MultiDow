@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>Magic Video Downloader</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
+    <style>
+        :root {
+            --primary: #4361ee;
+            --secondary: #4895ef;
+            --accent: #4cc9f0;
+            --background: rgba(255, 255, 255, 0.98);
+            --text: #2b2d42;
+            --success: #4CAF50;
+            --error: #f44336;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Poppins', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 1rem;
+        }
+
+        .container {
+            background: var(--background);
+            backdrop-filter: blur(12px);
+            padding: clamp(1.5rem, 5vw, 2.5rem);
+            border-radius: 20px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+            width: 100%;
+            max-width: 680px;
+            text-align: center;
+            transition: transform 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        h1 {
+            color: var(--primary);
+            margin-bottom: 1.25rem;
+            font-weight: 700;
+            font-size: clamp(1.75rem, 4vw, 2.5rem);
+            line-height: 1.2;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .input-group {
+            margin: 2rem 0;
+            position: relative;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 1rem 1.5rem;
+            border: 2px solid var(--primary);
+            border-radius: 15px;
+            font-size: clamp(0.9rem, 3vw, 1rem);
+            outline: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--text);
+        }
+
+        input[type="text"]:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 20px rgba(67, 97, 238, 0.2);
+        }
+
+        button {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            border: none;
+            padding: 1rem 2.5rem;
+            border-radius: 12px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 1rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(
+                120deg,
+                transparent,
+                rgba(255, 255, 255, 0.3),
+                transparent
+            );
+            transition: 0.5s;
+        }
+
+        button:hover::before {
+            left: 100%;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        .loading {
+            display: none;
+            margin: 2rem 0;
+        }
+
+        .loader {
+            width: 50px;
+            height: 50px;
+            margin: 0 auto;
+            border: 4px solid var(--primary);
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .result {
+            margin-top: 2rem;
+            display: none;
+            opacity: 0;
+            animation: fadeIn 0.5s ease forwards;
+        }
+
+        .video-preview {
+            width: 100%;
+            max-width: 400px;
+            margin: 1rem auto;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .download-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1rem 1.5rem;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white !important;
+            text-decoration: none;
+            border-radius: 10px;
+            margin: 1.5rem 0;
+            transition: transform 0.3s ease;
+            font-weight: 500;
+        }
+
+        .download-link:hover {
+            transform: translateY(-2px);
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--text);
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            display: none;
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes slideUp {
+            from { bottom: -50px; }
+            to { bottom: 20px; }
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 1.25rem;
+                border-radius: 16px;
+            }
+            
+            button {
+                width: 100%;
+                padding: 1rem;
+            }
+            
+            .download-link {
+                width: 100%;
+                justify-content: center;
+                text-align: center;
+            }
+        }
+
+        .magic-effect {
+            position: fixed;
+            pointer-events: none;
+            background: radial-gradient(circle, var(--accent) 10%, transparent 11%);
+            background-size: 200% 200%;
+            animation: magic 0.5s ease-out;
+        }
+
+        @keyframes magic {
+            from {
+                opacity: 1;
+                transform: scale(0);
+            }
+            to {
+                opacity: 0;
+                transform: scale(4);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Magic Video Downloader</h1>
+        
+        <div class="input-group">
+            <input type="text" id="url" placeholder="Pega tu enlace de video aquí..." 
+                   autocomplete="off" enterkeyhint="go">
+            <button onclick="processVideo()">✨ Generar Enlace Mágico</button>
+        </div>
+        
+        <div class="loading">
+            <div class="loader"></div>
+            <p style="margin-top: 1rem; color: var(--text)">Convirtiendo magia en realidad...</p>
+        </div>
+
+        <div class="result">
+            <div class="video-preview">
+                <img id="thumbnail" src="" alt="Video Preview" style="width: 100%; display: none;">
+            </div>
+            <a id="download-link" class="download-link" target="_blank" rel="noopener">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-download">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span id="link-text">Descargar Video</span>
+            </a>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.style.display = 'block';
+            toast.style.background = type === 'error' ? var(--error) : var(--success);
+            
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 3000);
+        }
+
+        function createMagicEffect(x, y) {
+            const effect = document.createElement('div');
+            effect.className = 'magic-effect';
+            effect.style.left = `${x}px`;
+            effect.style.top = `${y}px`;
+            document.body.appendChild(effect);
+            
+            setTimeout(() => effect.remove(), 500);
+        }
+
+        async function processVideo() {
+            const urlInput = document.getElementById('url');
+            const url = urlInput.value.trim();
+            const loading = document.querySelector('.loading');
+            const result = document.querySelector('.result');
+            const downloadLink = document.getElementById('download-link');
+            const linkText = document.getElementById('link-text');
+            const thumbnail = document.getElementById('thumbnail');
+
+            if (!url) {
+                showToast('Por favor ingresa un enlace válido', 'error');
+                urlInput.focus();
+                return;
+            }
+
+            try {
+                // Reset states
+                loading.style.display = 'block';
+                result.style.display = 'none';
+                thumbnail.style.display = 'none';
+                
+                const response = await fetch('/download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `url=${encodeURIComponent(url)}`
+                });
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                // Mostrar resultados
+                loading.style.display = 'none';
+                downloadLink.href = data.download_link;
+                linkText.textContent = `Descargar ${data.video_title}`;
+                
+                if (data.thumbnail) {
+                    thumbnail.src = data.thumbnail;
+                    thumbnail.style.display = 'block';
+                }
+                
+                result.style.display = 'block';
+                
+                // Efectos especiales
+                confetti({
+                    particleCount: 150,
+                    spread: 100,
+                    origin: { y: 0.6 },
+                    colors: ['#4361ee', '#4895ef', '#4cc9f0']
+                });
+                
+                // Efecto de sonido
+                new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3').play();
+                
+                // Efecto mágico
+                createMagicEffect(window.innerWidth/2, window.innerHeight/2);
+
+            } catch (error) {
+                showToast(error.message, 'error');
+                loading.style.display = 'none';
+            }
+        }
+
+        // Manejar Enter key
+        document.getElementById('url').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') processVideo();
+        });
+    </script>
+</body>
+  </html>
