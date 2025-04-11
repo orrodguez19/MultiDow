@@ -10,3 +10,4 @@ ffmpeg-python>=0.2.0
 secure-smtplib>=0.1.1
 backports.ssl>=0.0.9
 ffmpeg>=1.2.1
+requests<=2.32.3
