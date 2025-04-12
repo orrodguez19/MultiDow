@@ -4,22 +4,20 @@ import requests
 from flask import Flask, render_template, request, jsonify
 from yt_dlp import YoutubeDL
 from urllib.parse import unquote
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
 import logging
 from datetime import datetime
-import shutil
-from dotenv import load_dotenv
-
-# Cargar variables de entorno
-load_dotenv()
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'temp')
-app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_CONTENT_LENGTH', 1024 * 1024 * 1024))  # 1GB
+
+# Configuraciones hardcodeadas
+app.config['UPLOAD_FOLDER'] = 'temp'
+app.config['MAX_CONTENT_LENGTH'] = 1024 * 1024 * 1024  # 1GB
 app.config['ALLOWED_EXTENSIONS'] = {'mp4', 'webm', 'mkv', 'mov'}
-app.config['MAX_VIDEO_SIZE'] = int(os.getenv('MAX_VIDEO_SIZE', 500 * 1024 * 1024))  # 500MB
-app.config['TRANSFER_SH_URL'] = os.getenv('TRANSFER_SH_URL', 'https://transfer.sh')
+app.config['MAX_VIDEO_SIZE'] = 500 * 1024 * 1024  # 500MB
+app.config['TRANSFER_SH_URL'] = 'https://transfer.sh'
+app.config['TRANSFER_MAX_DAYS'] = '3'
+app.config['PORT'] = 10000
+app.config['DEBUG'] = True
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -28,14 +26,8 @@ logger = logging.getLogger(__name__)
 # Crear directorio temporal
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Configurar rate limiting
-limiter = Limiter(
-    app=app,
-    key_func=get_remote_address,
-    default_limits=["50 per day", "10 per hour"]
-)
-
 def allowed_file(filename):
+    """Verifica si el archivo tiene una extensión permitida."""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 def validate_url(url):
@@ -58,7 +50,7 @@ def upload_to_transfer(file_path):
             response = requests.put(
                 f"{app.config['TRANSFER_SH_URL']}/{os.path.basename(file_path)}",
                 data=f,
-                headers={'Max-Days': os.getenv('TRANSFER_MAX_DAYS', '3')}
+                headers={'Max-Days': app.config['TRANSFER_MAX_DAYS']}
             )
         response.raise_for_status()
         return response.text.strip()
@@ -84,11 +76,12 @@ def cleanup_temp_folder():
 
 @app.route('/')
 def index():
+    """Sirve la página principal."""
     return render_template('index.html')
 
 @app.route('/download', methods=['POST'])
-@limiter.limit("5 per minute")
 def download():
+    """Procesa la URL del video y genera un enlace de descarga."""
     url = unquote(request.form.get('url', '')).strip()
     if not url:
         return jsonify({'error': 'URL no proporcionada'}), 400
@@ -145,5 +138,4 @@ def download():
         cleanup_temp_folder()
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=os.getenv('FLASK_ENV', 'development') == 'development')
+    app.run(host='0.0.0.0', port=app.config['PORT'], debug=app.config['DEBUG'])
