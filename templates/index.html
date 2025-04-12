@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>Magic Video Downloader</title>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" integrity="sha512-z3gLpd7yknf1YoNbCzqRKc4qyor8gaKU1qmn+CShxbuBusANI9QpRohGBreCFkKxLhei6S9CQXFEbbKuqLg0DA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <style>
         :root {
@@ -78,6 +79,10 @@
             box-shadow: 0 0 20px rgba(67, 97, 238, 0.2);
         }
 
+        input:invalid {
+            border-color: var(--error);
+        }
+
         button {
             background: linear-gradient(135deg, var(--primary), var(--secondary));
             color: white;
@@ -92,6 +97,11 @@
             letter-spacing: 0.5px;
             position: relative;
             overflow: hidden;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
         }
 
         button::before {
@@ -110,7 +120,7 @@
             transition: 0.5s;
         }
 
-        button:hover::before {
+        button:hover:not(:disabled)::before {
             left: 100%;
         }
 
@@ -183,6 +193,34 @@
             border-radius: 8px;
             display: none;
             animation: slideUp 0.3s ease;
+            z-index: 1000;
+        }
+
+        .supported-platforms {
+            font-size: 0.85rem;
+            color: var(--text);
+            margin-top: 0.5rem;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .tooltip {
+            display: none;
+            position: absolute;
+            background: var(--text);
+            color: white;
+            padding: 0.5rem;
+            border-radius: 5px;
+            font-size: 0.8rem;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            text-align: center;
+        }
+
+        .supported-platforms:hover .tooltip {
+            display: block;
         }
 
         @keyframes fadeIn {
@@ -200,12 +238,12 @@
                 padding: 1.25rem;
                 border-radius: 16px;
             }
-            
+
             button {
                 width: 100%;
                 padding: 1rem;
             }
-            
+
             .download-link {
                 width: 100%;
                 justify-content: center;
@@ -236,24 +274,29 @@
 <body>
     <div class="container">
         <h1>🎬 Magic Video Downloader</h1>
-        
         <div class="input-group">
-            <input type="text" id="url" placeholder="Pega tu enlace de video aquí..." 
-                   autocomplete="off" enterkeyhint="go">
-            <button onclick="processVideo()">✨ Generar Enlace Mágico</button>
+            <input type="url" id="url" placeholder="Pega tu enlace de video aquí..." 
+                   autocomplete="off" enterkeyhint="go" aria-label="Enlace del video" required>
+            <div class="supported-platforms">
+                Plataformas soportadas
+                <span class="tooltip">YouTube, Vimeo, Dailymotion, y más</span>
+            </div>
+            <button id="process-btn" aria-label="Generar enlace de descarga">
+                <i class="fas fa-magic"></i> Generar Enlace Mágico
+            </button>
         </div>
-        
+
         <div class="loading">
             <div class="loader"></div>
-            <p style="margin-top: 1rem; color: var(--text)">Convirtiendo magia en realidad...</p>
+            <p style="margin-top: 1rem; color: var(--text)" id="loading-text">Convirtiendo magia en realidad...</p>
         </div>
 
         <div class="result">
             <div class="video-preview">
-                <img id="thumbnail" src="" alt="Video Preview" style="width: 100%; display: none;">
+                <img id="thumbnail" src="" alt="Vista previa del video" style="width: 100%; display: none;">
             </div>
-            <a id="download-link" class="download-link" target="_blank" rel="noopener">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-download">
+            <a id="download-link" class="download-link" target="_blank" rel="noopener" aria-label="Descargar video">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                     <polyline points="7 10 12 15 17 10"></polyline>
                     <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -266,12 +309,20 @@
     <div class="toast" id="toast"></div>
 
     <script>
+        const urlInput = document.getElementById('url');
+        const processBtn = document.getElementById('process-btn');
+        const loading = document.querySelector('.loading');
+        const result = document.querySelector('.result');
+        const downloadLink = document.getElementById('download-link');
+        const linkText = document.getElementById('link-text');
+        const thumbnail = document.getElementById('thumbnail');
+        const loadingText = document.getElementById('loading-text');
+
         function showToast(message, type = 'info') {
             const toast = document.getElementById('toast');
             toast.textContent = message;
             toast.style.display = 'block';
-            toast.style.background = type === 'error' ? var(--error) : var(--success);
-            
+            toast.style.background = type === 'error' ? 'var(--error)' : 'var(--success)';
             setTimeout(() => {
                 toast.style.display = 'none';
             }, 3000);
@@ -283,31 +334,48 @@
             effect.style.left = `${x}px`;
             effect.style.top = `${y}px`;
             document.body.appendChild(effect);
-            
             setTimeout(() => effect.remove(), 500);
         }
 
-        async function processVideo() {
-            const urlInput = document.getElementById('url');
-            const url = urlInput.value.trim();
-            const loading = document.querySelector('.loading');
-            const result = document.querySelector('.result');
-            const downloadLink = document.getElementById('download-link');
-            const linkText = document.getElementById('link-text');
-            const thumbnail = document.getElementById('thumbnail');
+        function validateURL(url) {
+            try {
+                new URL(url);
+                return true;
+            } catch {
+                return false;
+            }
+        }
 
+        async function processVideo() {
+            const url = urlInput.value.trim();
             if (!url) {
-                showToast('Por favor ingresa un enlace válido', 'error');
+                showToast('Por favor ingresa un enlace.', 'error');
+                urlInput.focus();
+                return;
+            }
+
+            if (!validateURL(url)) {
+                showToast('El enlace no es válido. Asegúrate de usar un formato correcto (por ejemplo, https://youtube.com/...).', 'error');
                 urlInput.focus();
                 return;
             }
 
             try {
-                // Reset states
+                // Deshabilitar botón y mostrar carga
+                processBtn.disabled = true;
+                processBtn.textContent = 'Procesando...';
                 loading.style.display = 'block';
                 result.style.display = 'none';
                 thumbnail.style.display = 'none';
-                
+
+                // Simular progreso
+                let progress = 0;
+                const progressInterval = setInterval(() => {
+                    progress += 10;
+                    loadingText.textContent = `Convirtiendo magia en realidad... ${progress}%`;
+                    if (progress >= 90) clearInterval(progressInterval);
+                }, 1000);
+
                 const response = await fetch('/download', {
                     method: 'POST',
                     headers: {
@@ -316,24 +384,27 @@
                     body: `url=${encodeURIComponent(url)}`
                 });
 
+                clearInterval(progressInterval);
+                loadingText.textContent = 'Convirtiendo magia en realidad...';
+
                 const data = await response.json();
-                
-                if (data.error) {
-                    throw new Error(data.error);
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Error desconocido');
                 }
 
                 // Mostrar resultados
                 loading.style.display = 'none';
                 downloadLink.href = data.download_link;
-                linkText.textContent = `Descargar ${data.video_title}`;
-                
+                linkText.textContent = `Descargar ${data.video_title || 'Video'}`;
+
                 if (data.thumbnail) {
                     thumbnail.src = data.thumbnail;
                     thumbnail.style.display = 'block';
                 }
-                
+
                 result.style.display = 'block';
-                
+
                 // Efectos especiales
                 confetti({
                     particleCount: 150,
@@ -341,23 +412,32 @@
                     origin: { y: 0.6 },
                     colors: ['#4361ee', '#4895ef', '#4cc9f0']
                 });
-                
-                // Efecto de sonido
-                new Audio('https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3').play();
-                
+
                 // Efecto mágico
-                createMagicEffect(window.innerWidth/2, window.innerHeight/2);
+                createMagicEffect(window.innerWidth / 2, window.innerHeight / 2);
 
             } catch (error) {
-                showToast(error.message, 'error');
+                const errorMessage = {
+                    'URL no proporcionada': 'Por favor ingresa un enlace.',
+                    'Formato de archivo no permitido': 'El video no está en un formato soportado.',
+                    'Video demasiado grande': 'El video excede el límite de tamaño (500 MB).',
+                    'Plataforma no soportada': 'Esta plataforma no es compatible. Prueba con YouTube o Vimeo.'
+                }[error.message] || `Error: ${error.message}`;
+                showToast(errorMessage, 'error');
                 loading.style.display = 'none';
+            } finally {
+                processBtn.disabled = false;
+                processBtn.innerHTML = '<i class="fas fa-magic"></i> Generar Enlace Mágico';
             }
         }
 
         // Manejar Enter key
-        document.getElementById('url').addEventListener('keypress', (e) => {
+        urlInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') processVideo();
         });
+
+        // Manejar clic en botón
+        processBtn.addEventListener('click', processVideo);
     </script>
 </body>
-  </html>
+</html>
