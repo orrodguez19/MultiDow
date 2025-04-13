@@ -19,15 +19,18 @@ logging.basicConfig(
 logger = logging.getLogger("deltachat_bot")
 
 # --- Configuraciones ---
-BOT_EMAIL = "multidown@arcanechat.me"
-BOT_PASSWORD = "mO*061119"
-DC_ACCOUNT_PATH = os.environ.get("DC_ACCOUNT_PATH", "/data/dc_bot_account")  # Persistente para Render
+BOT_EMAIL = os.environ.get("BOT_EMAIL", "bot@example.com")  # Usa variable de entorno
+BOT_PASSWORD = os.environ.get("BOT_PASSWORD", "tu_contraseña")
+DC_ACCOUNT_PATH = os.environ.get("DC_ACCOUNT_PATH", "/tmp/dc_bot_account")  # Ruta temporal para pruebas
 PORT = int(os.environ.get("PORT", 10000))
 
 # Inicializamos Flask
 app = Flask(__name__)
 
 # Inicializamos la cuenta de DeltaChat
+logger.info(f"Intentando usar DC_ACCOUNT_PATH: {DC_ACCOUNT_PATH}")
+logger.info(f"Directorio padre existe: {os.path.exists(os.path.dirname(DC_ACCOUNT_PATH))}")
+logger.info(f"Directorio padre escribible: {os.access(os.path.dirname(DC_ACCOUNT_PATH), os.W_OK)}")
 account = Account(db_path=DC_ACCOUNT_PATH)
 
 # --- Cerrar cuenta al terminar ---
