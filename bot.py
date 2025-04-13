@@ -1,3 +1,4 @@
+from flask import Flask, request, jsonify
 import imaplib
 import smtplib
 import email
@@ -6,11 +7,13 @@ import yt_dlp as yt_dl
 import os
 import subprocess
 
+app = Flask(__name__)
+
 # Configuración de la cuenta de correo (las credenciales directamente en el código)
-EMAIL = "orrodriguez588@gmail.com"
-PASSWORD = "cnkpjyridpqcbclu"
-SMTP_SERVER = "smtp.gmail.com"
-IMAP_SERVER = "imap.gmail.com"
+EMAIL = "orrodriguez588@gmail.com"  # Tu correo electrónico
+PASSWORD = "cnkpjyridpqcbclu"  # Tu contraseña de correo
+SMTP_SERVER = "smtp.gmail.com"  # Servidor SMTP para Gmail (o el que uses)
+IMAP_SERVER = "imap.gmail.com"  # Servidor IMAP para Gmail (o el que uses)
 
 # Conectar al servidor de correo (IMAP)
 def connect_to_mail():
@@ -71,56 +74,49 @@ def send_email_with_attachment(to_email, subject, body, attachment_path):
         server.login(EMAIL, PASSWORD)
         server.sendmail(EMAIL, to_email, msg.as_string())
 
-# Función para gestionar las notificaciones de nuevos correos
-def wait_for_new_mail(mail):
-    mail.select("inbox")
-    # Usar IDLE para esperar notificaciones de nuevos correos
-    mail.idle()
-    print("Esperando nuevos correos...")
-    mail.idle_done()  # Bloquea hasta que haya una notificación de un nuevo correo
-
-# Procesar correos y descargar vídeos
-def process_emails():
+# Ruta para recibir correos nuevos
+@app.route('/check_emails', methods=['GET'])
+def check_emails():
     mail = connect_to_mail()
+    email_ids = check_new_emails(mail)
+    if not email_ids:
+        return jsonify({"message": "No new emails."}), 200
     
-    while True:
-        wait_for_new_mail(mail)
-        email_ids = check_new_emails(mail)
-
-        for email_id in email_ids:
-            status, msg_data = mail.fetch(email_id, "(RFC822)")
-            if status != "OK":
-                continue
-            
-            for response_part in msg_data:
-                if isinstance(response_part, tuple):
-                    msg = email.message_from_bytes(response_part[1])
-                    subject, encoding = decode_header(msg["Subject"])[0]
-                    if isinstance(subject, bytes):
-                        subject = subject.decode(encoding if encoding else 'utf-8')
-                    
-                    # Buscar enlaces en el cuerpo del mensaje
-                    for part in msg.walk():
-                        if part.get_content_type() == "text/plain":
-                            body = part.get_payload(decode=True).decode()
-                            urls = [word for word in body.split() if "youtube.com" in word]
+    for email_id in email_ids:
+        status, msg_data = mail.fetch(email_id, "(RFC822)")
+        if status != "OK":
+            continue
+        
+        for response_part in msg_data:
+            if isinstance(response_part, tuple):
+                msg = email.message_from_bytes(response_part[1])
+                subject, encoding = decode_header(msg["Subject"])[0]
+                if isinstance(subject, bytes):
+                    subject = subject.decode(encoding if encoding else 'utf-8')
+                
+                # Buscar enlaces en el cuerpo del mensaje
+                for part in msg.walk():
+                    if part.get_content_type() == "text/plain":
+                        body = part.get_payload(decode=True).decode()
+                        urls = [word for word in body.split() if "youtube.com" in word]
+                        
+                        for url in urls:
+                            print(f"Enlace encontrado: {url}")
                             
-                            for url in urls:
-                                print(f"Enlace encontrado: {url}")
-                                
-                                # Descargar el vídeo con calidad media (720p)
-                                download_video(url, quality="bestvideo[height<=720]+bestaudio")
-                                
-                                # Comprimir el vídeo después de la descarga
-                                downloaded_video = "downloads/ejemplo_video.mp4"
-                                compressed_video = "downloads/compressed_video.mp4"
-                                compress_video(downloaded_video, compressed_video)
-                                
-                                # Enviar el vídeo comprimido al remitente
-                                send_email_with_attachment(msg["From"], "Aquí está tu vídeo comprimido", 
-                                                           "Te envío el vídeo solicitado.", compressed_video)
+                            # Descargar el vídeo con calidad media (720p)
+                            download_video(url, quality="bestvideo[height<=720]+bestaudio")
+                            
+                            # Comprimir el vídeo después de la descarga
+                            downloaded_video = "downloads/ejemplo_video.mp4"
+                            compressed_video = "downloads/compressed_video.mp4"
+                            compress_video(downloaded_video, compressed_video)
+                            
+                            # Enviar el vídeo comprimido al remitente
+                            send_email_with_attachment(msg["From"], "Aquí está tu vídeo comprimido", 
+                                                       "Te envío el vídeo solicitado.", compressed_video)
 
-        mail.store(email_id, '+FLAGS', '\\Seen')  # Marcar el mensaje como leído
+    mail.store(email_id, '+FLAGS', '\\Seen')  # Marcar el mensaje como leído
+    return jsonify({"message": "Emails processed."}), 200
 
 if __name__ == "__main__":
-    process_emails()
+    app.run(host='0.0.0.0', port=5000)  # El puerto 5000 es común en entornos de desarrollo
