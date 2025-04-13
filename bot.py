@@ -1,135 +1,95 @@
 import os
-import threading
-import time
-from flask import Flask, render_template
-import requests
-from deltachat import Account, Chat, Message
 import logging
-import atexit
+import requests
+from flask import Flask
+from deltachat import Account, Config, Chat, Message, DC_EVENT_MSG
 
-# --- Configuración de Logging ---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("bot.log"),
-        logging.StreamHandler()
-    ]
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("deltachat_bot")
 
-# --- Configuraciones ---
-BOT_EMAIL = "orrodriguez588@gmail.com"
-BOT_PASSWORD = "cnkpjyridpqcbclu"
-DC_ACCOUNT_PATH = "/tmp/dc_bot_account"
-PORT = 10000
+# Ruta donde se guardarán los datos de DeltaChat
+DC_PATH = "./dc_storage"
 
-# Inicializamos Flask
-app = Flask(__name__)
+# Datos de la cuenta
+EMAIL = "orrodriguez588@gmail.com"
+PASSWORD = "cnkpjyridpqcbclu"
 
-# Inicializamos la cuenta de DeltaChat
-account = Account(db_path=DC_ACCOUNT_PATH)
+# Crear cuenta de Delta Chat
+account = Account(DC_PATH)
 
-# --- Cerrar cuenta al terminar ---
-def shutdown_account():
-    account.stop_io()
-    account.shutdown()
-    logger.info("Cuenta de DeltaChat cerrada")
-
-atexit.register(shutdown_account)
-
-# --- Configurar y conectar la cuenta ---
 def setup_account():
-    if not account.is_configured():
-        logger.info("Configurando cuenta...")
-        account.set_config("addr", BOT_EMAIL)
-        account.set_config("mail_pw", BOT_PASSWORD)
-        account.set_config("mail_server", "imap.gmail.com")
-        account.set_config("mail_port", "993")
-        account.set_config("mail_security", "SSL")
-        account.set_config("send_server", "smtp.gmail.com")
-        account.set_config("send_port", "465")
-        account.set_config("send_security", "SSL")
-        account.set_config("e2ee_enabled", "0")
-        account.configure()
+    logger.info("Configurando cuenta...")
+    config = Config(account)
+    config.set_config("addr", EMAIL)
+    config.set_config("mail_pw", PASSWORD)
+    config.set_config("bot", "1")
+    config.set_config("send_receipts", "1")
+    config.set_config("watch", "1")
+    config.set_config("e2ee_enabled", "1")
+    config.set_config("show_emails", "1")
+    account.set_config(config)
 
-        timeout = 60
-        start_time = time.time()
-        while not account.is_configured() and time.time() - start_time < timeout:
-            time.sleep(1)
-            logger.info("Esperando configuración...")
-        if not account.is_configured():
-            raise RuntimeError("No se pudo configurar la cuenta")
+    account.configure()
     logger.info("Cuenta conectada correctamente")
-    account.start_io()
 
-# --- Subir archivo a uguu ---
+# Función para subir archivos a Uguu
 def subir_a_uguu(file_path):
     try:
-        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
-        if file_size_mb > 100:
-            return None, f"El archivo es demasiado grande ({file_size_mb:.2f} MB). Máximo 100 MB."
-
         with open(file_path, "rb") as f:
-            r = requests.post("https://uguu.se/upload.php", files={"files[]": f})
-            if r.ok:
-                url = r.json()["files"][0]["url"]
-                logger.info(f"Archivo subido: {url}")
-                return url, None
-            else:
-                return None, "Error al subir el archivo"
+            files = {"files[]": f}
+            response = requests.post("https://uguu.se/upload.php", files=files)
+        if response.ok:
+            return response.json()["files"][0]["url"], None
+        else:
+            return None, f"Error HTTP {response.status_code}"
     except Exception as e:
-        logger.error(f"Error al subir archivo: {e}")
-        return None, "Ocurrió un error al subir el archivo"
+        return None, str(e)
 
-# --- Procesar mensajes ---
-def handle_messages():
+# Callback para manejar mensajes
+def message_callback(event, chat_id, msg_id):
+    if event != DC_EVENT_MSG:
+        return
+
     try:
-        while True:
-            for msg in account.get_all_messages():
-                if not msg.is_seen():
-                    chat = Chat(account, msg.chat_id)
-                    contact = msg.get_sender_contact()
-                    name = contact.display_name or contact.addr or "Usuario"
+        msg = Message(account, msg_id)
+        chat = Chat(account, chat_id)
+        contact = msg.get_sender_contact()
+        name = contact.display_name or contact.addr or "Usuario"
 
-                    # Texto
-                    if msg.text:
-                        text = msg.text.strip().lower()
-                        if text == "/start":
-                            chat.send_text(f"¡Hola {name}! Envíame un archivo y te daré un enlace para descargarlo.")
-                        elif text == "/help":
-                            chat.send_text("Comandos:\n/start - Inicia\n/help - Ayuda\nEnvía un archivo para subirlo.")
-                        else:
-                            chat.send_text(f"No entendí el mensaje, {name}. Usa /help para ver comandos.")
+        if msg.text:
+            text = msg.text.strip().lower()
+            if text == "/start":
+                chat.send_text(f"¡Hola {name}! Envíame un archivo y te daré un enlace para descargarlo.")
+            elif text == "/help":
+                chat.send_text("Comandos:\n/start - Inicia\n/help - Ayuda\nEnvía un archivo para subirlo.")
+            else:
+                chat.send_text(f"No entendí el mensaje, {name}. Usa /help para ver comandos.")
 
-                    # Archivos
-                    file_path = msg.get_file()
-                    if file_path and os.path.exists(file_path):
-                        chat.send_text("Subiendo tu archivo...")
-                        link, error = subir_a_uguu(file_path)
-                        if link:
-                            chat.send_text(f"Aquí está tu archivo:\n{link}")
-                        else:
-                            chat.send_text(f"No se pudo subir tu archivo: {error}")
-
-                    msg.mark_seen()
-            time.sleep(2)
+        file_path = msg.get_file()
+        if file_path and os.path.exists(file_path):
+            chat.send_text("Subiendo tu archivo...")
+            link, error = subir_a_uguu(file_path)
+            if link:
+                chat.send_text(f"Aquí está tu archivo:\n{link}")
+            else:
+                chat.send_text(f"No se pudo subir tu archivo: {error}")
     except Exception as e:
-        logger.error(f"Error procesando mensajes: {e}")
+        logger.error(f"Error al procesar mensaje: {e}")
 
-# --- Iniciar hilo de procesamiento ---
+# Iniciar el bot
 def start_bot():
     setup_account()
-    threading.Thread(target=handle_messages, daemon=True).start()
+    account.set_event_handler(message_callback)
+    logger.info("Bot escuchando mensajes...")
 
-# --- Rutas Flask ---
+# Servidor Flask (puerto 10000 para Render)
+app = Flask(__name__)
+
 @app.route("/")
 def index():
-    return "<h1>Bot de DeltaChat corriendo!</h1>"
+    return "Bot DeltaChat activo."
 
-# --- Inicio ---
 if __name__ == "__main__":
-    os.makedirs(os.path.dirname(DC_ACCOUNT_PATH), exist_ok=True)
     start_bot()
-    logger.info(f"Servidor Flask corriendo en puerto {PORT}")
-    app.run(host="0.0.0.0", port=PORT)
+    logger.info("Servidor Flask corriendo en puerto 10000")
+    app.run(host="0.0.0.0", port=10000)
