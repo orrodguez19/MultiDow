@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Uguu Uploader Bot</title>
+    <style>
+        .cta-button {
+            background: #2563eb; 
+            color: white; 
+            padding: 12px 24px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-family: 'Poppins', sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <h1>Uguu Uploader Bot</h1>
+    {% if invite_link %}
+        <a href="{{ invite_link }}" class="cta-button">
+            Chatear con cifrado E2EE
+        </a>
+        <p>Escanea este QR para chatear:</p>
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data={{ invite_link | urlencode }}" alt="QR">
+    {% else %}
+        <p>Error: Bot no disponible temporalmente</p>
+    {% endif %}
+</body>
+</html>
