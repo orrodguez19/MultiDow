@@ -47,20 +47,21 @@ def setup_account():
     try:
         if not account.is_configured():
             logger.info("Configurando cuenta de DeltaChat...")
-            account.configure(
-                addr=BOT_EMAIL,
-                mail_pw=BOT_PASSWORD,
-                mail_server="imap.gmail.com",
-                mail_port=993,
-                mail_security="SSL",
-                send_server="smtp.gmail.com",
-                send_port=465,
-                send_security="SSL",
-                provider="",
-                server_flags=0,
-                e2ee_enabled=False,  # Sin cifrado de extremo a extremo
-            )
-            account.start_io()
+            # Establecer configuración usando set_config
+            account.set_config("addr", BOT_EMAIL)
+            account.set_config("mail_pw", BOT_PASSWORD)
+            account.set_config("mail_server", "imap.gmail.com")
+            account.set_config("mail_port", "993")
+            account.set_config("mail_security", "SSL")
+            account.set_config("send_server", "smtp.gmail.com")
+            account.set_config("send_port", "465")
+            account.set_config("send_security", "SSL")
+            account.set_config("e2ee_enabled", "0")  # Sin cifrado de extremo a extremo
+            
+            # Configurar la cuenta
+            account.configure()
+            
+            # Esperar a que la configuración se complete
             timeout = 60
             start_time = time.time()
             while not account.is_configured() and time.time() - start_time < timeout:
