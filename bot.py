@@ -3,11 +3,11 @@ import threading
 import time
 from flask import Flask, render_template
 import requests
-from deltachat import Account, Chat
+from deltachat import Account
 import logging
 import atexit
 
-# Configuración de logging
+# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("deltachat_bot")
 
@@ -66,12 +66,15 @@ def subir_a_uguu(file_path):
     return None, "No se pudo subir el archivo"
 
 def process_incoming():
+    seen_ids = set()
     while True:
         try:
-            msglist = account.get_messages()
-            for msg in msglist:
-                if not msg.is_seen():
-                    chat = msg.chat
+            for chat in account.get_chats():
+                for msg in chat.get_messages():
+                    if msg.id in seen_ids or msg.is_outgoing():
+                        continue
+                    seen_ids.add(msg.id)
+
                     contact = msg.get_sender_contact()
                     name = contact.display_name or contact.addr or "Usuario"
 
@@ -91,7 +94,6 @@ def process_incoming():
                             chat.send_text(f"¡Listo! Aquí tienes tu enlace:\n{link}")
                         else:
                             chat.send_text(f"Error: {err}")
-                    msg.mark_seen()
         except Exception as e:
             logger.error(f"Error procesando mensajes: {e}")
         time.sleep(5)
