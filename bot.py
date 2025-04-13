@@ -15,8 +15,8 @@ app = Flask(__name__)
 # ================= CONFIGURACIÓN =================
 class BotConfig:
     # Credenciales ArcaneChat
-    EMAIL = "multidown@arcanechat.me"
-    PASSWORD = "mO*061119"
+    EMAIL = "miguelorlandos@nauta.cu"
+    PASSWORD = "TdrPQQxq"
     
     # Configuración del servicio
     DISPLAY_NAME = "Uguu Uploader Pro"
