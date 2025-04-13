@@ -7,7 +7,7 @@ import requests
 # --- Configuraciones ---
 BOT_EMAIL = "multidown@arcanechat.me"
 BOT_PASSWORD = "mO*061119"
-DC_CLI_PATH = "/ruta/a/deltachat"
+DC_CLI_PATH = "deltachat"
 DC_ACCOUNT_PATH = "/tmp/dc_bot_account"
 PORT = 10000
 
