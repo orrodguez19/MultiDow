@@ -1,94 +1,88 @@
 import os
-import logging
-import tempfile
+import subprocess
+from flask import Flask, render_template
+from flask import request
 import requests
-import asyncio
-from threading import Thread
-from flask import Flask
-from deltachat_rpc_client import Rpc, Bot, EventType  # Import corregido
-from waitress import serve
-import humanize
 
+# --- Configuraciones ---
+BOT_EMAIL = "multidown@arcanechat.me"
+BOT_PASSWORD = "mO*061119"
+DC_CLI_PATH = "/ruta/a/deltachat"
+DC_ACCOUNT_PATH = "/tmp/dc_bot_account"
+PORT = 10000
+
+# Inicializamos Flask
 app = Flask(__name__)
 
-# Configuración (mantén tu misma configuración)
-class BotConfig:
-    EMAIL = "iguelorlandos@nauta.cu"
-    PASSWORD = "TdrPQQxq"
-    DISPLAY_NAME = "Uguu Uploader Pro"
-    PORT = 10000
-    UGUU_URL = "https://uguu.se/api.php?d=upload-tool"
-    MAX_FILE_SIZE = 100 * 1024 * 1024
-    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'pdf', 'txt', 'zip'}
-
-# Configuración de logging (igual que antes)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log'),
-        logging.StreamHandler()
+# --- Comando para crear el enlace de invitación ---
+def crear_enlace_invitacion():
+    cmd = [
+        DC_CLI_PATH,
+        "--db", DC_ACCOUNT_PATH,
+        "qr",
+        "create",
+        "--contact",
+        f"{BOT_EMAIL};password={BOT_PASSWORD}"
     ]
-)
-logger = logging.getLogger(__name__)
+    resultado = subprocess.run(cmd, capture_output=True, text=True)
+    for line in resultado.stdout.splitlines():
+        if line.startswith("dcqr:"):
+            return f"https://web.deltachat-mailbox.org/#/chat?dcqr={line[5:]}"
+    return "#"
 
-async def upload_to_uguu(filepath, filename):
-    """Sube archivo a Uguu.se"""
-    try:
-        with open(filepath, 'rb') as f:
-            response = requests.post(
-                BotConfig.UGUU_URL,
-                files={'file': (filename, f)},
-                timeout=30
-            )
-        response.raise_for_status()
-        return response.text.strip()
-    except Exception as e:
-        logger.error(f"Error subiendo archivo: {str(e)}")
-        raise RuntimeError("Error al subir el archivo")
+# --- Función para subir archivos a uguu ---
+def subir_a_uguu(file_path):
+    with open(file_path, "rb") as f:
+        r = requests.post("https://uguu.se/upload.php", files={"files[]": f})
+        if r.ok:
+            return r.json()["files"][0]["url"]
+    return None
 
-async def delta_bot():
-    """Bot principal con imports actualizados"""
-    rpc = Rpc()
-    bot = Bot(rpc)
-    
-    @bot.on(EventType.INCOMING_MESSAGE)  # EventType directamente
-    async def handle_message(event):
-        try:
-            message = await bot.get_message_by_id(event.message_id)
-            chat = await message.chat.create()
-            
-            if await message.chat.is_group():
-                return
+# --- Verificar mensajes nuevos en DeltaChat ---
+def revisar_mensajes():
+    cmd = [DC_CLI_PATH, "--db", DC_ACCOUNT_PATH, "msgs", "list", "--unseen"]
+    resultado = subprocess.run(cmd, capture_output=True, text=True)
+    mensajes = resultado.stdout.strip().split("\n\n")
+    for mensaje in mensajes:
+        if "file:" in mensaje:
+            partes = mensaje.split("\n")
+            file_line = next((l for l in partes if l.startswith("file:")), None)
+            chat_id_line = next((l for l in partes if l.startswith("chat_id:")), None)
+            if file_line and chat_id_line:
+                file_path = file_line.replace("file: ", "").strip()
+                chat_id = chat_id_line.replace("chat_id: ", "").strip()
+                link = subir_a_uguu(file_path)
+                if link:
+                    subprocess.run([
+                        DC_CLI_PATH,
+                        "--db", DC_ACCOUNT_PATH,
+                        "chats", "send-text",
+                        "--chat", chat_id,
+                        "--text", f"Aquí está tu enlace de descarga: {link}"
+                    ])
 
-            if message.text:
-                cmd = message.text.lower().strip()
-                if cmd == "/start":
-                    await chat.send_text("🤖 Bot activo. Envía un archivo para subirlo")
-                elif cmd == "/help":
-                    await chat.send_text("ℹ️ Adjunta archivos (max 100MB)")
-                elif cmd == "/formats":
-                    formats = "📁 Formatos:\n" + "\n".join(f"- {ext.upper()}" for ext in BotConfig.ALLOWED_EXTENSIONS)
-                    await chat.send_text(formats)
+# --- Ruta principal del sitio ---
+@app.route("/")
+def index():
+    enlace = crear_enlace_invitacion()
+    return render_template("index.html", enlace=enlace)
 
-            elif message.file:
-                await process_attachment(message, chat)
-                
-        except Exception as e:
-            logger.error(f"Error: {str(e)}")
-            await chat.send_text("⚠️ Error procesando mensaje")
+# --- Ruta webhook para revisar mensajes (puedes usar un cron también) ---
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    revisar_mensajes()
+    return "OK"
 
-    account = await rpc.get_account()
-    if not await account.is_configured():
-        await account.configure(BotConfig.EMAIL, BotConfig.PASSWORD)
-        await account.set_config("displayname", BotConfig.DISPLAY_NAME)
-        logger.info("Cuenta configurada")
-
-    logger.info("Bot iniciado")
-    await bot.run_forever()
-
-# Resto del código (process_attachment, run_server, etc.) mantiene la misma estructura
-
-if __name__ == '__main__':
-    Thread(target=asyncio.run, args=(delta_bot(),), daemon=True).start()
-    serve(app, host="0.0.0.0", port=BotConfig.PORT)
+# --- Inicio del servidor ---
+if __name__ == "__main__":
+    os.makedirs(os.path.dirname(DC_ACCOUNT_PATH), exist_ok=True)
+    # Crear cuenta si no existe
+    if not os.path.exists(DC_ACCOUNT_PATH):
+        subprocess.run([
+            DC_CLI_PATH,
+            "--db", DC_ACCOUNT_PATH,
+            "account", "setup",
+            "--addr", BOT_EMAIL,
+            "--mail_pw", BOT_PASSWORD
+        ])
+    app.run(host="0.0.0.0", port=PORT)
