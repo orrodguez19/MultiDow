@@ -35,10 +35,9 @@ account = Account(db_path=DC_ACCOUNT_PATH)
 
 # --- Cerrar cuenta al terminar ---
 def shutdown_account():
-    if account.is_running():
-        account.stop_io()
-        account.shutdown()
-        logger.info("Cuenta de DeltaChat cerrada")
+    account.stop_io()
+    account.shutdown()
+    logger.info("Cuenta de DeltaChat cerrada")
 
 atexit.register(shutdown_account)
 
@@ -71,9 +70,10 @@ def setup_account():
                 logger.error("No se pudo configurar la cuenta de DeltaChat")
                 raise RuntimeError("No se pudo configurar la cuenta de DeltaChat")
             logger.info("Cuenta configurada correctamente")
-        if not account.is_running():
-            account.start_io()
-            logger.info("Conexión de DeltaChat iniciada")
+        
+        # Iniciar operaciones de entrada/salida
+        account.start_io()
+        logger.info("Conexión de DeltaChat iniciada")
     except Exception as e:
         logger.error(f"Error en setup_account: {e}")
         raise
@@ -85,16 +85,17 @@ def subir_a_uguu(file_path):
         file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
         if file_size_mb > max_size_mb:
             logger.warning(f"Archivo demasiado grande: {file_size_mb} MB")
-            return None
+            return None, f"El archivo es demasiado grande ({file_size_mb:.2f} MB). El límite es {max_size_mb} MB."
         with open(file_path, "rb") as f:
             r = requests.post("https://uguu.se/upload.php", files={"files[]": f})
             if r.ok:
                 url = r.json()["files"][0]["url"]
                 logger.info(f"Archivo subido: {url}")
-                return url
+                return url, None
     except Exception as e:
         logger.error(f"Error al subir archivo: {e}")
-    return None
+        return None, "Error al subir el archivo. Por favor, intenta de nuevo."
+    return None, "No se pudo subir el archivo."
 
 # --- Procesar mensajes nuevos ---
 def process_messages():
@@ -106,17 +107,51 @@ def process_messages():
                 chat_id = event.chat_id
                 msg_id = event.msg_id
                 msg = account.get_message_by_id(msg_id)
+                chat = Chat(account, chat_id)
+                
                 if msg.is_in_fresh() or msg.is_in_noticed():
-                    if msg.file and os.path.exists(msg.file):
-                        logger.info(f"Procesando archivo: {msg.file}")
-                        link = subir_a_uguu(msg.file)
-                        if link:
-                            chat = Chat(account, chat_id)
-                            chat.send_text(f"Aquí está tu enlace de descarga: {link}")
-                            logger.info(f"Enlace enviado: {link}")
+                    # Obtener el nombre del contacto (si está disponible)
+                    contact = msg.get_sender_contact()
+                    contact_name = contact.display_name or contact.addr or "Usuario"
+                    
+                    # Procesar mensajes de texto
+                    if msg.text:
+                        text = msg.text.lower().strip()
+                        if text == "/start":
+                            chat.send_text(
+                                f"¡Hola, {contact_name}! Bienvenid@ al Bot de DeltaChat. 😊\n"
+                                "Envíame un archivo y te daré un enlace para descargarlo.\n"
+                                "Usa /help para ver los comandos disponibles."
+                            )
+                        elif text == "/help":
+                            chat.send_text(
+                                "📋 Comandos disponibles:\n"
+                                "/start - Inicia la conversación con el bot.\n"
+                                "/help - Muestra esta ayuda.\n"
+                                "Envía cualquier archivo (máx. 100 MB) para obtener un enlace de descarga."
+                            )
                         else:
-                            logger.warning("No se pudo subir el archivo")
-                        msg.mark_seen()
+                            chat.send_text(
+                                f"Hola, {contact_name}. No entendí ese mensaje. 😅\n"
+                                "Envíame un archivo para subirlo o usa /help para ver los comandos."
+                            )
+                    
+                    # Procesar archivos
+                    if msg.file and os.path.exists(msg.file):
+                        logger.info(f"Procesando archivo: {msg.file} de {contact_name}")
+                        chat.send_text(f"{contact_name}, recibí tu archivo. Subiéndolo... ⏳")
+                        link, error = subir_a_uguu(msg.file)
+                        if link:
+                            chat.send_text(
+                                f"¡Listo, {contact_name}! Aquí está tu enlace de descarga:\n{link}\n"
+                                "El enlace es válido por 24 horas."
+                            )
+                            logger.info(f"Enlace enviado: {link} a {contact_name}")
+                        else:
+                            chat.send_text(f"Lo siento, {contact_name}. {error}")
+                            logger.warning(f"No se pudo subir el archivo para {contact_name}")
+                    
+                    msg.mark_seen()
     except Exception as e:
         logger.error(f"Error en process_messages: {e}")
         raise
