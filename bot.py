@@ -12,17 +12,17 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("bot.log"),  # Guarda logs en un archivo
-        logging.StreamHandler()          # Muestra logs en consola
+        logging.FileHandler("bot.log"),
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger("deltachat_bot")
 
 # --- Configuraciones ---
-BOT_EMAIL = os.environ.get("BOT_EMAIL", "bot@example.com")  # Usa variable de entorno
-BOT_PASSWORD = os.environ.get("BOT_PASSWORD", "tu_contraseña")
-DC_ACCOUNT_PATH = os.environ.get("DC_ACCOUNT_PATH", "/tmp/dc_bot_account")  # Ruta temporal para pruebas
-PORT = int(os.environ.get("PORT", 10000))
+BOT_EMAIL = "orrodriguez588@gmail.com"
+BOT_PASSWORD = "cnkpjyridpqcbclu"
+DC_ACCOUNT_PATH = "/tmp/dc_bot_account"
+PORT = 10000
 
 # Inicializamos Flask
 app = Flask(__name__)
@@ -50,12 +50,18 @@ def setup_account():
             account.configure(
                 addr=BOT_EMAIL,
                 mail_pw=BOT_PASSWORD,
+                mail_server="imap.gmail.com",
+                mail_port=993,
+                mail_security="SSL",
+                send_server="smtp.gmail.com",
+                send_port=465,
+                send_security="SSL",
                 provider="",
                 server_flags=0,
-                e2ee_enabled=True,
+                e2ee_enabled=False,  # Sin cifrado de extremo a extremo
             )
             account.start_io()
-            timeout = 60  # segundos
+            timeout = 60
             start_time = time.time()
             while not account.is_configured() and time.time() - start_time < timeout:
                 time.sleep(1)
@@ -73,7 +79,7 @@ def setup_account():
 
 # --- Función para subir archivos a uguu ---
 def subir_a_uguu(file_path):
-    max_size_mb = 100  # Límite de uguu.se
+    max_size_mb = 100
     try:
         file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
         if file_size_mb > max_size_mb:
@@ -89,7 +95,7 @@ def subir_a_uguu(file_path):
         logger.error(f"Error al subir archivo: {e}")
     return None
 
-# --- Procesar mensajes nuevos en tiempo real ---
+# --- Procesar mensajes nuevos ---
 def process_messages():
     try:
         setup_account()
@@ -99,7 +105,7 @@ def process_messages():
                 chat_id = event.chat_id
                 msg_id = event.msg_id
                 msg = account.get_message_by_id(msg_id)
-                if msg.is_in_fresh() or msg.is_in_noticed():  # Mensaje no leído
+                if msg.is_in_fresh() or msg.is_in_noticed():
                     if msg.file and os.path.exists(msg.file):
                         logger.info(f"Procesando archivo: {msg.file}")
                         link = subir_a_uguu(msg.file)
@@ -118,29 +124,15 @@ def process_messages():
 def start_message_processing():
     threading.Thread(target=process_messages, daemon=True).start()
 
-# --- Comando para crear el enlace de invitación ---
-def crear_enlace_invitacion():
-    try:
-        setup_account()
-        qr_code = account.get_qr_code()
-        enlace = f"https://web.deltachat-mailbox.org/#/chat?dcqr={qr_code}"
-        logger.info(f"Enlace de invitación generado: {enlace}")
-        return enlace
-    except Exception as e:
-        logger.error(f"Error al generar QR: {e}")
-        return "#"
-
 # --- Ruta principal del sitio ---
 @app.route("/")
 def index():
-    enlace = crear_enlace_invitacion()
-    return render_template("index.html", enlace=enlace)
+    return render_template("index.html")
 
 # --- Inicio del servidor ---
 if __name__ == "__main__":
     try:
         os.makedirs(os.path.dirname(DC_ACCOUNT_PATH), exist_ok=True)
-        # Iniciar el procesamiento de mensajes
         start_message_processing()
         logger.info(f"Iniciando servidor Flask en puerto {PORT}")
         app.run(host="0.0.0.0", port=PORT)
