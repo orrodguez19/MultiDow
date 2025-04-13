@@ -11,8 +11,8 @@ BOT_PASSWORD = "mO*061119"
 DC_ACCOUNT_PATH = "/tmp/dc_bot_account"
 PORT = 10000
 
-# Intentamos encontrar el ejecutable 'deltachat' en el PATH
-DC_CLI_PATH = shutil.which("deltachat")
+# Intentamos encontrar el ejecutable
+DC_CLI_PATH = "./deltachat"
 
 # Si no se encuentra, lanzamos un error
 if DC_CLI_PATH is None:
