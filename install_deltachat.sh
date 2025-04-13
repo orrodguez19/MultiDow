@@ -1,5 +1,5 @@
 #!/bin/bash
-# Descarga el binario de deltachat CLI para Linux x86_64
-wget https://github.com/deltachat/deltachat-core-rust/releases/latest/download/deltachat-cli-linux-x86_64 -O /usr/local/bin/deltachat
+# Descarga el binario de deltachat CLI a un directorio escribible
+wget https://github.com/deltachat/deltachat-core-rust/releases/latest/download/deltachat-cli-linux-x86_64 -O ./deltachat
 # Dale permisos de ejecución
-chmod +x /usr/local/bin/deltachat
+chmod +x ./deltachat
