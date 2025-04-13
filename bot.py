@@ -3,7 +3,7 @@ import threading
 import time
 from flask import Flask, render_template
 import requests
-from deltachat import Account, Chat, Message
+from deltachat import Account, Chat, Message, DC_EVENT_INCOMING_MSG
 import logging
 import atexit
 
@@ -54,8 +54,7 @@ def setup_account():
             account.set_config("send_server", "smtp.gmail.com")
             account.set_config("send_port", "465")
             account.set_config("send_security", "SSL")
-            account.set_config("e2ee_enabled", "0")  # Sin cifrado E2EE
-
+            account.set_config("e2ee_enabled", "0")
             account.configure()
 
             timeout = 60
@@ -64,17 +63,15 @@ def setup_account():
                 time.sleep(1)
                 logger.info("Esperando configuración...")
             if not account.is_configured():
-                logger.error("No se pudo configurar la cuenta de DeltaChat")
                 raise RuntimeError("No se pudo configurar la cuenta de DeltaChat")
             logger.info("Cuenta configurada correctamente")
-
         account.start_io()
         logger.info("Conexión de DeltaChat iniciada")
     except Exception as e:
         logger.error(f"Error en setup_account: {e}")
         raise
 
-# --- Subir archivos a uguu ---
+# --- Función para subir archivos a uguu ---
 def subir_a_uguu(file_path):
     max_size_mb = 100
     try:
@@ -93,8 +90,8 @@ def subir_a_uguu(file_path):
         return None, "Error al subir el archivo. Por favor, intenta de nuevo."
     return None, "No se pudo subir el archivo."
 
-# --- Manejador de mensajes entrantes ---
-def handle_message(msg: Message):
+# --- Manejador de mensajes ---
+def handle_message(msg):
     try:
         chat = msg.chat
         contact = msg.get_sender_contact()
@@ -123,7 +120,7 @@ def handle_message(msg: Message):
 
         if msg.file and os.path.exists(msg.file):
             logger.info(f"Procesando archivo: {msg.file} de {contact_name}")
-            chat.send_text(f"{contact_name}, recibí tu archivo. Subiéndolo...")
+            chat.send_text(f"{contact_name}, recibí tu archivo. Subiéndolo... ⏳")
             link, error = subir_a_uguu(msg.file)
             if link:
                 chat.send_text(
@@ -136,22 +133,31 @@ def handle_message(msg: Message):
                 logger.warning(f"No se pudo subir el archivo para {contact_name}")
 
         msg.mark_seen()
-
     except Exception as e:
-        logger.error(f"Error al procesar mensaje: {e}")
+        logger.error(f"Error al manejar mensaje: {e}")
+
+# --- Manejador de eventos (fallback clásico) ---
+def on_event(account, event_type, data1, data2):
+    if event_type == DC_EVENT_INCOMING_MSG:
+        try:
+            msg_id = data2
+            msg = account.get_message_by_id(msg_id)
+            handle_message(msg)
+        except Exception as e:
+            logger.error(f"Error en on_event: {e}")
 
 # --- Procesar mensajes nuevos ---
 def process_messages():
     try:
         setup_account()
-        account.add_on_message(handle_message)
+        account.add_hook(on_event)
         while True:
             time.sleep(1)
     except Exception as e:
         logger.error(f"Error en process_messages: {e}")
         raise
 
-# --- Iniciar procesamiento de mensajes en un hilo separado ---
+# --- Iniciar el procesamiento de mensajes en un hilo separado ---
 def start_message_processing():
     threading.Thread(target=process_messages, daemon=True).start()
 
