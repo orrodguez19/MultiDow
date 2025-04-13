@@ -3,7 +3,7 @@ import logging
 import requests
 import yt_dlp
 from flask import Flask
-from deltachat import Account, Config, Chat, Message, DC_EVENT_MSG
+from deltachat import Account, Chat, Message, DC_EVENT_MSG
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("deltachat_bot")
@@ -23,16 +23,16 @@ account = Account(DC_PATH)
 
 def setup_account():
     logger.info("Configurando cuenta...")
-    config = Config(account)
-    config.set_config("addr", EMAIL)
-    config.set_config("mail_pw", PASSWORD)
-    config.set_config("bot", "1")
-    config.set_config("send_receipts", "1")
-    config.set_config("watch", "1")
-    config.set_config("e2ee_enabled", "1")
-    config.set_config("show_emails", "1")
-    account.set_config(config)
-
+    
+    # Asumimos que 'set_config' y la configuración directa en la cuenta puede ser suficiente.
+    account.set_config("addr", EMAIL)
+    account.set_config("mail_pw", PASSWORD)
+    account.set_config("bot", "1")
+    account.set_config("send_receipts", "1")
+    account.set_config("watch", "1")
+    account.set_config("e2ee_enabled", "1")
+    account.set_config("show_emails", "1")
+    
     account.configure()
     logger.info("Cuenta conectada correctamente")
 
