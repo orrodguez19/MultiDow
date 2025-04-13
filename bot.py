@@ -1,9 +1,9 @@
 import os
-import subprocess
-import shutil
+import threading
+import time
 from flask import Flask, render_template
-from flask import request
 import requests
+from deltachat import Account, Chat, Message, EventLogger
 
 # --- Configuraciones ---
 BOT_EMAIL = "multidown@arcanechat.me"
@@ -11,62 +11,80 @@ BOT_PASSWORD = "mO*061119"
 DC_ACCOUNT_PATH = "/tmp/dc_bot_account"
 PORT = 10000
 
-# Intentamos encontrar el ejecutable
-DC_CLI_PATH = "./deltachat"
-
-# Si no se encuentra, lanzamos un error
-if DC_CLI_PATH is None:
-    raise FileNotFoundError("No se encontró el ejecutable 'deltachat'. Asegúrate de que esté instalado correctamente.")
-
 # Inicializamos Flask
 app = Flask(__name__)
 
-# --- Comando para crear el enlace de invitación ---
-def crear_enlace_invitacion():
-    cmd = [
-        DC_CLI_PATH,
-        "--db", DC_ACCOUNT_PATH,
-        "qr",
-        "create",
-        "--contact",
-        f"{BOT_EMAIL};password={BOT_PASSWORD}"
-    ]
-    resultado = subprocess.run(cmd, capture_output=True, text=True)
-    for line in resultado.stdout.splitlines():
-        if line.startswith("dcqr:"):
-            return f"https://web.deltachat-mailbox.org/#/chat?dcqr={line[5:]}"
-    return "#"
+# Inicializamos la cuenta de DeltaChat con un logger para depuración
+account = Account(db_path=DC_ACCOUNT_PATH)
+logger = EventLogger(account, "deltachat_bot", level="INFO")
+
+# --- Configurar y conectar la cuenta ---
+def setup_account():
+    if not account.is_configured():
+        print("Configurando cuenta de DeltaChat...")
+        account.configure(
+            addr=BOT_EMAIL,
+            mail_pw=BOT_PASSWORD,
+            provider="",
+            server_flags=0,
+            e2ee_enabled=True,
+        )
+        account.start_io()
+        # Esperar a que la configuración se complete
+        timeout = 60  # segundos
+        start_time = time.time()
+        while not account.is_configured() and time.time() - start_time < timeout:
+            time.sleep(1)
+        if not account.is_configured():
+            raise RuntimeError("No se pudo configurar la cuenta de DeltaChat")
+        print("Cuenta configurada correctamente")
+    if not account.is_running():
+        account.start_io()
+        print("Conexión de DeltaChat iniciada")
 
 # --- Función para subir archivos a uguu ---
 def subir_a_uguu(file_path):
-    with open(file_path, "rb") as f:
-        r = requests.post("https://uguu.se/upload.php", files={"files[]": f})
-        if r.ok:
-            return r.json()["files"][0]["url"]
+    try:
+        with open(file_path, "rb") as f:
+            r = requests.post("https://uguu.se/upload.php", files={"files[]": f})
+            if r.ok:
+                return r.json()["files"][0]["url"]
+    except Exception as e:
+        print(f"Error al subir archivo: {e}")
     return None
 
-# --- Verificar mensajes nuevos en DeltaChat ---
-def revisar_mensajes():
-    cmd = [DC_CLI_PATH, "--db", DC_ACCOUNT_PATH, "msgs", "list", "--unseen"]
-    resultado = subprocess.run(cmd, capture_output=True, text=True)
-    mensajes = resultado.stdout.strip().split("\n\n")
-    for mensaje in mensajes:
-        if "file:" in mensaje:
-            partes = mensaje.split("\n")
-            file_line = next((l for l in partes if l.startswith("file:")), None)
-            chat_id_line = next((l for l in partes if l.startswith("chat_id:")), None)
-            if file_line and chat_id_line:
-                file_path = file_line.replace("file: ", "").strip()
-                chat_id = chat_id_line.replace("chat_id: ", "").strip()
-                link = subir_a_uguu(file_path)
-                if link:
-                    subprocess.run([
-                        DC_CLI_PATH,
-                        "--db", DC_ACCOUNT_PATH,
-                        "chats", "send-text",
-                        "--chat", chat_id,
-                        "--text", f"Aquí está tu enlace de descarga: {link}"
-                    ])
+# --- Procesar mensajes nuevos en tiempo real ---
+def process_messages():
+    setup_account()
+    while True:
+        event = account.wait_for_event()
+        if event.kind == "DC_EVENT_INCOMING_MSG":
+            chat_id = event.chat_id
+            msg_id = event.msg_id
+            msg = account.get_message_by_id(msg_id)
+            if msg.is_in_fresh() or msg.is_in_noticed():  # Mensaje no leído
+                if msg.file and os.path.exists(msg.file):
+                    print(f"Procesando archivo: {msg.file}")
+                    link = subir_a_uguu(msg.file)
+                    if link:
+                        chat = Chat(account, chat_id)
+                        chat.send_text(f"Aquí está tu enlace de descarga: {link}")
+                        print(f"Enlace enviado: {link}")
+                    msg.mark_seen()
+
+# --- Iniciar el procesamiento de mensajes en un hilo separado ---
+def start_message_processing():
+    threading.Thread(target=process_messages, daemon=True).start()
+
+# --- Comando para crear el enlace de invitación ---
+def crear_enlace_invitacion():
+    setup_account()
+    try:
+        qr_code = account.get_qr_code()
+        return f"https://web.deltachat-mailbox.org/#/chat?dcqr={qr_code}"
+    except Exception as e:
+        print(f"Error al generar QR: {e}")
+        return "#"
 
 # --- Ruta principal del sitio ---
 @app.route("/")
@@ -74,22 +92,10 @@ def index():
     enlace = crear_enlace_invitacion()
     return render_template("index.html", enlace=enlace)
 
-# --- Ruta webhook para revisar mensajes (puedes usar un cron también) ---
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    revisar_mensajes()
-    return "OK"
-
 # --- Inicio del servidor ---
 if __name__ == "__main__":
     os.makedirs(os.path.dirname(DC_ACCOUNT_PATH), exist_ok=True)
-    # Crear cuenta si no existe
-    if not os.path.exists(DC_ACCOUNT_PATH):
-        subprocess.run([
-            DC_CLI_PATH,
-            "--db", DC_ACCOUNT_PATH,
-            "account", "setup",
-            "--addr", BOT_EMAIL,
-            "--mail_pw", BOT_PASSWORD
-        ])
-    app.run(host="0.0.0.0", port=PORT)
+    # Iniciar el procesamiento de mensajes
+    start_message_processing()
+    port = int(os.environ.get("PORT", PORT))  # Compatible con Render
+    app.run(host="0.0.0.0", port=port)
