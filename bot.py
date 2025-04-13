@@ -1,95 +1,77 @@
 import os
+import time
 import logging
 import requests
 from flask import Flask
-from deltachat import Account, Config, Chat, Message, DC_EVENT_MSG
+from deltachat_rpc_client import Account
 
-logging.basicConfig(level=logging.INFO)
+# DATOS DEL BOT — MODIFÍCALOS AQUÍ
+BOT_EMAIL = "orrodriguez588@gmail.com"
+BOT_PASSWORD = "cnkpjyridpqcbclu"
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("deltachat_bot")
 
-# Ruta donde se guardarán los datos de DeltaChat
-DC_PATH = "./dc_storage"
-
-# Datos de la cuenta
-EMAIL = "orrodriguez588@gmail.com"
-PASSWORD = "cnkpjyridpqcbclu"
-
-# Crear cuenta de Delta Chat
-account = Account(DC_PATH)
-
-def setup_account():
-    logger.info("Configurando cuenta...")
-    config = Config(account)
-    config.set_config("addr", EMAIL)
-    config.set_config("mail_pw", PASSWORD)
-    config.set_config("bot", "1")
-    config.set_config("send_receipts", "1")
-    config.set_config("watch", "1")
-    config.set_config("e2ee_enabled", "1")
-    config.set_config("show_emails", "1")
-    account.set_config(config)
-
-    account.configure()
-    logger.info("Cuenta conectada correctamente")
-
-# Función para subir archivos a Uguu
-def subir_a_uguu(file_path):
-    try:
-        with open(file_path, "rb") as f:
-            files = {"files[]": f}
-            response = requests.post("https://uguu.se/upload.php", files=files)
-        if response.ok:
-            return response.json()["files"][0]["url"], None
-        else:
-            return None, f"Error HTTP {response.status_code}"
-    except Exception as e:
-        return None, str(e)
-
-# Callback para manejar mensajes
-def message_callback(event, chat_id, msg_id):
-    if event != DC_EVENT_MSG:
-        return
-
-    try:
-        msg = Message(account, msg_id)
-        chat = Chat(account, chat_id)
-        contact = msg.get_sender_contact()
-        name = contact.display_name or contact.addr or "Usuario"
-
-        if msg.text:
-            text = msg.text.strip().lower()
-            if text == "/start":
-                chat.send_text(f"¡Hola {name}! Envíame un archivo y te daré un enlace para descargarlo.")
-            elif text == "/help":
-                chat.send_text("Comandos:\n/start - Inicia\n/help - Ayuda\nEnvía un archivo para subirlo.")
-            else:
-                chat.send_text(f"No entendí el mensaje, {name}. Usa /help para ver comandos.")
-
-        file_path = msg.get_file()
-        if file_path and os.path.exists(file_path):
-            chat.send_text("Subiendo tu archivo...")
-            link, error = subir_a_uguu(file_path)
-            if link:
-                chat.send_text(f"Aquí está tu archivo:\n{link}")
-            else:
-                chat.send_text(f"No se pudo subir tu archivo: {error}")
-    except Exception as e:
-        logger.error(f"Error al procesar mensaje: {e}")
-
-# Iniciar el bot
-def start_bot():
-    setup_account()
-    account.set_event_handler(message_callback)
-    logger.info("Bot escuchando mensajes...")
-
-# Servidor Flask (puerto 10000 para Render)
 app = Flask(__name__)
+account = None
 
-@app.route("/")
-def index():
-    return "Bot DeltaChat activo."
+@app.route("/", methods=["GET", "HEAD"])
+def home():
+    return "Bot activo"
+
+def handle_msg(chat_id, msg_id):
+    msg = account.get_message(msg_id)
+    if msg["file"]:
+        logger.info("Archivo recibido, subiendo a uguu...")
+        file_path = msg["file"]
+        with open(file_path, "rb") as f:
+            res = requests.post("https://uguu.se/upload.php", files={"file": f})
+        if res.status_code == 200:
+            url = res.json()["files"][0]["url"]
+            logger.info(f"Archivo subido: {url}")
+            account.send_text(chat_id, f"Aquí está tu archivo: {url}")
+        else:
+            account.send_text(chat_id, "Hubo un error al subir el archivo.")
+    else:
+        account.send_text(chat_id, "Envíame un archivo para subirlo a Uguu.")
+
+def main():
+    global account
+    logger.info("Configurando cuenta...")
+
+    os.makedirs("bot_data", exist_ok=True)
+    account = Account("bot_data")
+    if not account.is_configured():
+        account.set_config("mail_smtp_server", "smtp.gmail.com")
+        account.set_config("mail_smtp_port", "587")
+        account.set_config("mail_imap_server", "imap.gmail.com")
+        account.set_config("mail_imap_port", "993")
+        account.set_config("mail_user", BOT_EMAIL)
+        account.set_config("mail_password", BOT_PASSWORD)
+        account.set_config("displayname", "Bot de Uguu")
+        account.configure()
+        logger.info("Cuenta configurada correctamente")
+    else:
+        logger.info("Cuenta ya configurada")
+
+    account.start_io()
+    logger.info("Escuchando mensajes...")
+
+    def on_event(event):
+        if event["type"] == "msg":
+            handle_msg(event["chat_id"], event["msg_id"])
+
+    account.set_event_handler(on_event)
+
+    # Iniciar Flask en segundo plano
+    import threading
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=10000)).start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        account.stop_io()
 
 if __name__ == "__main__":
-    start_bot()
-    logger.info("Servidor Flask corriendo en puerto 10000")
-    app.run(host="0.0.0.0", port=10000)
+    main()
