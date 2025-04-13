@@ -119,4 +119,4 @@ def check_emails():
     return jsonify({"message": "Emails processed."}), 200
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)  # El puerto 5000 es común en entornos de desarrollo
+    app.run(host='0.0.0.0', port=10000)  # El puerto 5000 es común en entornos de desarrollo
