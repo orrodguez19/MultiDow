@@ -1,5 +1,6 @@
 import os
 import subprocess
+import shutil
 from flask import Flask, render_template
 from flask import request
 import requests
@@ -7,9 +8,15 @@ import requests
 # --- Configuraciones ---
 BOT_EMAIL = "multidown@arcanechat.me"
 BOT_PASSWORD = "mO*061119"
-DC_CLI_PATH = "deltachat"
 DC_ACCOUNT_PATH = "/tmp/dc_bot_account"
 PORT = 10000
+
+# Intentamos encontrar el ejecutable 'deltachat' en el PATH
+DC_CLI_PATH = shutil.which("deltachat")
+
+# Si no se encuentra, lanzamos un error
+if DC_CLI_PATH is None:
+    raise FileNotFoundError("No se encontró el ejecutable 'deltachat'. Asegúrate de que esté instalado correctamente.")
 
 # Inicializamos Flask
 app = Flask(__name__)
