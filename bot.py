@@ -1,99 +1,126 @@
+import imaplib
+import smtplib
+import email
+from email.header import decode_header
+import yt_dlp as yt_dl
 import os
-import logging
-import requests
-import yt_dlp
-from flask import Flask
-from deltachat import Account, Chat, Message, DC_EVENT_MSG
+import subprocess
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("deltachat_bot")
-
-# Ruta donde se guardarán los datos de DeltaChat
-DC_PATH = "./dc_storage"
-
-# Datos de la cuenta (usa variables de entorno en producción)
+# Configuración de la cuenta de correo (las credenciales directamente en el código)
 EMAIL = "orrodriguez588@gmail.com"
 PASSWORD = "cnkpjyridpqcbclu"
+SMTP_SERVER = "smtp.gmail.com"
+IMAP_SERVER = "imap.gmail.com"
 
-# Ruta donde se guardará el video descargado temporalmente
-TEMP_VIDEO_PATH = "/tmp/video.mp4"
+# Conectar al servidor de correo (IMAP)
+def connect_to_mail():
+    mail = imaplib.IMAP4_SSL(IMAP_SERVER)
+    mail.login(EMAIL, PASSWORD)
+    return mail
 
-# Crear cuenta de Delta Chat
-account = Account(DC_PATH)
+# Buscar correos no leídos
+def check_new_emails(mail):
+    mail.select("inbox")
+    status, messages = mail.search(None, 'UNSEEN')  # Obtener mensajes no leídos
+    if status != "OK":
+        print("Error al obtener mensajes")
+        return []
+    email_ids = messages[0].split()
+    return email_ids
 
-def setup_account():
-    logger.info("Configurando cuenta...")
-    
-    # Asumimos que 'set_config' y la configuración directa en la cuenta puede ser suficiente.
-    account.set_config("addr", EMAIL)
-    account.set_config("mail_pw", PASSWORD)
-    account.set_config("bot", "1")
-    account.set_config("send_receipts", "1")
-    account.set_config("watch", "1")
-    account.set_config("e2ee_enabled", "1")
-    account.set_config("show_emails", "1")
-    
-    account.configure()
-    logger.info("Cuenta conectada correctamente")
-
-# Función para descargar el video usando yt-dlp
-def download_video(url):
+# Descargar vídeo de YouTube con calidad media (720p o similar)
+def download_video(url, quality="bestvideo[height<=720]+bestaudio"):
     options = {
-        'format': 'bestvideo+bestaudio/best',  # Mejor calidad de video y audio
-        'outtmpl': TEMP_VIDEO_PATH,            # Guardar el archivo en la ruta temporal
+        'format': quality,
+        'outtmpl': 'downloads/%(title)s.%(ext)s',
+        'noplaylist': True  # Para no descargar listas de reproducción
     }
-    
-    with yt_dlp.YoutubeDL(options) as ydl:
+    with yt_dl.YoutubeDL(options) as ydl:
         ydl.download([url])
 
-# Callback para manejar mensajes
-def message_callback(event, chat_id, msg_id):
-    if event != DC_EVENT_MSG:
-        return
+# Comprimir vídeo sin perder calidad con calidad media
+def compress_video(input_video, output_video):
+    # Usamos ffmpeg para comprimir el vídeo sin perder mucha calidad
+    command = [
+        'ffmpeg', 
+        '-i', input_video, 
+        '-c:v', 'libx264',  # Usar el codec de vídeo H.264
+        '-crf', '23',  # Calidad media (puedes ajustar si deseas más calidad o menos)
+        '-preset', 'medium',  # Control de la velocidad de compresión (medium es un buen equilibrio)
+        '-c:a', 'aac',  # Usar el codec de audio AAC
+        output_video
+    ]
+    subprocess.run(command, check=True)
 
-    try:
-        msg = Message(account, msg_id)
-        chat = Chat(account, chat_id)
-        contact = msg.get_sender_contact()
-        name = contact.display_name or contact.addr or "Usuario"
+# Enviar el vídeo al remitente
+def send_email_with_attachment(to_email, subject, body, attachment_path):
+    msg = email.mime.multipart.MIMEMultipart()
+    msg['From'] = EMAIL
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(email.mime.text.MIMEText(body, 'plain'))
+    
+    with open(attachment_path, "rb") as f:
+        attach = email.mime.base.MIMEBase('application', 'octet-stream')
+        attach.set_payload(f.read())
+        email.encoders.encode_base64(attach)
+        attach.add_header('Content-Disposition', 'attachment', filename=os.path.basename(attachment_path))
+        msg.attach(attach)
+    
+    with smtplib.SMTP_SSL(SMTP_SERVER, 465) as server:
+        server.login(EMAIL, PASSWORD)
+        server.sendmail(EMAIL, to_email, msg.as_string())
 
-        if msg.text:
-            text = msg.text.strip().lower()
-            if text == "/start":
-                chat.send_text(f"¡Hola {name}! Envíame un enlace de video y te lo enviaré de vuelta.")
-            elif text == "/help":
-                chat.send_text("Comandos:\n/start - Inicia\n/help - Ayuda\nEnvía un enlace de video para que lo descargue.")
-            else:
-                chat.send_text(f"No entendí el mensaje, {name}. Usa /help para ver comandos.")
+# Función para gestionar las notificaciones de nuevos correos
+def wait_for_new_mail(mail):
+    mail.select("inbox")
+    # Usar IDLE para esperar notificaciones de nuevos correos
+    mail.idle()
+    print("Esperando nuevos correos...")
+    mail.idle_done()  # Bloquea hasta que haya una notificación de un nuevo correo
 
-        if 'http' in msg.text:  # Verifica si el mensaje contiene un enlace
-            try:
-                chat.send_text("Descargando el video...")
-                download_video(msg.text)  # Llama a la función para descargar el video
-                chat.send_text("Enviando el video...")
-                chat.send_file(TEMP_VIDEO_PATH)  # Envía el archivo de video
+# Procesar correos y descargar vídeos
+def process_emails():
+    mail = connect_to_mail()
+    
+    while True:
+        wait_for_new_mail(mail)
+        email_ids = check_new_emails(mail)
 
-                # Elimina el archivo después de enviarlo
-                os.remove(TEMP_VIDEO_PATH)
-            except Exception as e:
-                chat.send_text(f"Hubo un error al descargar o enviar el video: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error al procesar mensaje: {e}")
+        for email_id in email_ids:
+            status, msg_data = mail.fetch(email_id, "(RFC822)")
+            if status != "OK":
+                continue
+            
+            for response_part in msg_data:
+                if isinstance(response_part, tuple):
+                    msg = email.message_from_bytes(response_part[1])
+                    subject, encoding = decode_header(msg["Subject"])[0]
+                    if isinstance(subject, bytes):
+                        subject = subject.decode(encoding if encoding else 'utf-8')
+                    
+                    # Buscar enlaces en el cuerpo del mensaje
+                    for part in msg.walk():
+                        if part.get_content_type() == "text/plain":
+                            body = part.get_payload(decode=True).decode()
+                            urls = [word for word in body.split() if "youtube.com" in word]
+                            
+                            for url in urls:
+                                print(f"Enlace encontrado: {url}")
+                                
+                                # Descargar el vídeo con calidad media (720p)
+                                download_video(url, quality="bestvideo[height<=720]+bestaudio")
+                                
+                                # Comprimir el vídeo después de la descarga
+                                downloaded_video = "downloads/ejemplo_video.mp4"
+                                compressed_video = "downloads/compressed_video.mp4"
+                                compress_video(downloaded_video, compressed_video)
+                                
+                                # Enviar el vídeo comprimido al remitente
+                                send_email_with_attachment(msg["From"], "Aquí está tu vídeo comprimido", 
+                                                           "Te envío el vídeo solicitado.", compressed_video)
 
-# Iniciar el bot
-def start_bot():
-    setup_account()
-    account.set_event_handler(message_callback)
-    logger.info("Bot escuchando mensajes...")
-
-# Servidor Flask (puerto 10000 para Render)
-app = Flask(__name__)
-
-@app.route("/")
-def index():
-    return "Bot DeltaChat activo."
+        mail.store(email_id, '+FLAGS', '\\Seen')  # Marcar el mensaje como leído
 
 if __name__ == "__main__":
-    start_bot()
-    logger.info("Servidor Flask corriendo en puerto 10000")
-    app.run(host="0.0.0.0", port=10000)
+    process_emails()
