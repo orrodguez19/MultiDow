@@ -1,122 +1,127 @@
-from flask import Flask, request, jsonify
-import imaplib
-import smtplib
-import email
-from email.header import decode_header
-import yt_dlp as yt_dl
 import os
-import subprocess
+import time
+import threading
+import smtplib
+import imaplib
+import email
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+from email.mime.text import MIMEText
+from flask import Flask
+from yt_dlp import YoutubeDL
+from hurry.filesize import size
+
+EMAIL = "orrodriguez588@gmail.com"
+PASSWORD = "cnkpjyridpqcbclu"
+IMAP_SERVER = "imap.gmail.com"
+SMTP_SERVER = "smtp.gmail.com"
+IMAP_PORT = 993
+SMTP_PORT = 587
+
+DOWNLOAD_DIR = "downloads"
+MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB para DeltaChat
+CHECK_INTERVAL = 20  # segundos
 
 app = Flask(__name__)
 
-# Configuración de la cuenta de correo (las credenciales directamente en el código)
-EMAIL = "orrodriguez588@gmail.com"  # Tu correo electrónico
-PASSWORD = "cnkpjyridpqcbclu"  # Tu contraseña de correo
-SMTP_SERVER = "smtp.gmail.com"  # Servidor SMTP para Gmail (o el que uses)
-IMAP_SERVER = "imap.gmail.com"  # Servidor IMAP para Gmail (o el que uses)
+@app.route("/")
+def home():
+    return "DeltaChat bot is running!"
 
-# Conectar al servidor de correo (IMAP)
-def connect_to_mail():
-    mail = imaplib.IMAP4_SSL(IMAP_SERVER)
-    mail.login(EMAIL, PASSWORD)
-    return mail
+def download_video(url, audio_only=False):
+    if not os.path.exists(DOWNLOAD_DIR):
+        os.makedirs(DOWNLOAD_DIR)
 
-# Buscar correos no leídos
-def check_new_emails(mail):
-    mail.select("inbox")
-    status, messages = mail.search(None, 'UNSEEN')  # Obtener mensajes no leídos
-    if status != "OK":
-        print("Error al obtener mensajes")
-        return []
-    email_ids = messages[0].split()
-    return email_ids
-
-# Descargar vídeo de YouTube con calidad media (720p o similar)
-def download_video(url, quality="bestvideo[height<=720]+bestaudio"):
-    options = {
-        'format': quality,
-        'outtmpl': 'downloads/%(title)s.%(ext)s',
-        'noplaylist': True  # Para no descargar listas de reproducción
+    filename = None
+    ydl_opts = {
+        'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
+        'quiet': True,
+        'no_warnings': True,
     }
-    with yt_dl.YoutubeDL(options) as ydl:
-        ydl.download([url])
 
-# Comprimir vídeo sin perder calidad con calidad media
-def compress_video(input_video, output_video):
-    # Usamos ffmpeg para comprimir el vídeo sin perder mucha calidad
-    command = [
-        'ffmpeg', 
-        '-i', input_video, 
-        '-c:v', 'libx264',  # Usar el codec de vídeo H.264
-        '-crf', '23',  # Calidad media (puedes ajustar si deseas más calidad o menos)
-        '-preset', 'medium',  # Control de la velocidad de compresión (medium es un buen equilibrio)
-        '-c:a', 'aac',  # Usar el codec de audio AAC
-        output_video
-    ]
-    subprocess.run(command, check=True)
+    if audio_only:
+        ydl_opts.update({
+            'format': 'bestaudio',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+            }]
+        })
 
-# Enviar el vídeo al remitente
-def send_email_with_attachment(to_email, subject, body, attachment_path):
-    msg = email.mime.multipart.MIMEMultipart()
-    msg['From'] = EMAIL
-    msg['To'] = to_email
-    msg['Subject'] = subject
-    msg.attach(email.mime.text.MIMEText(body, 'plain'))
-    
-    with open(attachment_path, "rb") as f:
-        attach = email.mime.base.MIMEBase('application', 'octet-stream')
-        attach.set_payload(f.read())
-        email.encoders.encode_base64(attach)
-        attach.add_header('Content-Disposition', 'attachment', filename=os.path.basename(attachment_path))
-        msg.attach(attach)
-    
-    with smtplib.SMTP_SSL(SMTP_SERVER, 465) as server:
+    with YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info)
+        if audio_only:
+            filename = filename.rsplit('.', 1)[0] + '.mp3'
+        return filename, info.get("title")
+
+def send_email(to_address, subject, body, attachment_path=None):
+    msg = MIMEMultipart()
+    msg["From"] = EMAIL
+    msg["To"] = to_address
+    msg["Subject"] = subject
+
+    msg.attach(MIMEText(body, "plain"))
+
+    if attachment_path and os.path.exists(attachment_path):
+        with open(attachment_path, "rb") as f:
+            part = MIMEApplication(f.read(), Name=os.path.basename(attachment_path))
+            part["Content-Disposition"] = f'attachment; filename="{os.path.basename(attachment_path)}"'
+            msg.attach(part)
+
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+        server.starttls()
         server.login(EMAIL, PASSWORD)
-        server.sendmail(EMAIL, to_email, msg.as_string())
+        server.send_message(msg)
 
-# Ruta para recibir correos nuevos
-@app.route('/check_emails', methods=['GET'])
+def process_email(msg):
+    from_address = email.utils.parseaddr(msg["From"])[1]
+    subject = msg["Subject"]
+    payload = msg.get_payload(decode=True).decode(errors="ignore")
+
+    if "/download" in payload or "/audio" in payload:
+        try:
+            is_audio = "/audio" in payload
+            url = payload.split()[-1]
+            filepath, title = download_video(url, audio_only=is_audio)
+
+            file_size = os.path.getsize(filepath)
+            if file_size > MAX_FILE_SIZE:
+                send_email(from_address, "Archivo demasiado grande",
+                           f"{title} excede el límite de {size(MAX_FILE_SIZE)}.")
+            else:
+                send_email(from_address, f"{title}", "Aquí tienes tu archivo", filepath)
+        except Exception as e:
+            send_email(from_address, "Error de descarga", str(e))
+
 def check_emails():
-    mail = connect_to_mail()
-    email_ids = check_new_emails(mail)
-    if not email_ids:
-        return jsonify({"message": "No new emails."}), 200
-    
-    for email_id in email_ids:
-        status, msg_data = mail.fetch(email_id, "(RFC822)")
-        if status != "OK":
-            continue
-        
-        for response_part in msg_data:
-            if isinstance(response_part, tuple):
-                msg = email.message_from_bytes(response_part[1])
-                subject, encoding = decode_header(msg["Subject"])[0]
-                if isinstance(subject, bytes):
-                    subject = subject.decode(encoding if encoding else 'utf-8')
-                
-                # Buscar enlaces en el cuerpo del mensaje
-                for part in msg.walk():
-                    if part.get_content_type() == "text/plain":
-                        body = part.get_payload(decode=True).decode()
-                        urls = [word for word in body.split() if "youtube.com" in word]
-                        
-                        for url in urls:
-                            print(f"Enlace encontrado: {url}")
-                            
-                            # Descargar el vídeo con calidad media (720p)
-                            download_video(url, quality="bestvideo[height<=720]+bestaudio")
-                            
-                            # Comprimir el vídeo después de la descarga
-                            downloaded_video = "downloads/ejemplo_video.mp4"
-                            compressed_video = "downloads/compressed_video.mp4"
-                            compress_video(downloaded_video, compressed_video)
-                            
-                            # Enviar el vídeo comprimido al remitente
-                            send_email_with_attachment(msg["From"], "Aquí está tu vídeo comprimido", 
-                                                       "Te envío el vídeo solicitado.", compressed_video)
+    while True:
+        try:
+            mail = imaplib.IMAP4_SSL(IMAP_SERVER, IMAP_PORT)
+            mail.login(EMAIL, PASSWORD)
+            mail.select("inbox")
 
-    mail.store(email_id, '+FLAGS', '\\Seen')  # Marcar el mensaje como leído
-    return jsonify({"message": "Emails processed."}), 200
+            result, data = mail.search(None, '(UNSEEN)')
+            ids = data[0].split()
+
+            for num in ids:
+                result, data = mail.fetch(num, "(RFC822)")
+                raw_email = data[0][1]
+                msg = email.message_from_bytes(raw_email)
+
+                process_email(msg)
+
+            mail.logout()
+        except Exception as e:
+            print(f"[ERROR IMAP]: {e}")
+
+        time.sleep(CHECK_INTERVAL)
+
+def start_email_thread():
+    thread = threading.Thread(target=check_emails)
+    thread.daemon = True
+    thread.start()
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=10000)  # El puerto 5000 es común en entornos de desarrollo
+    start_email_thread()
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
