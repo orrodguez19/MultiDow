@@ -13,8 +13,6 @@ deltachat==1.142.7
 Flask==2.2.3
 yt-dlp==2023.11.16
 deltachat==1.142.7
-python-dotenv==1.0.0
-yt-dlp==2025.4.7
 ffmpeg<=5.0.1
 imaplib
 smtplib
