@@ -14,5 +14,3 @@ Flask==2.2.3
 yt-dlp==2023.11.16
 deltachat==1.142.7
 ffmpeg<=5.0.1
-smtplib
-email
